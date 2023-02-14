@@ -182,32 +182,33 @@ def load_tf_records_dataset(tf_record_files) -> Dataset:
     return dataset
 
 
-def _incremental_farthest_search(image_tensors_list, k: int, distance_func, pre_comparison_transformation_func):
+def _incremental_farthest_search(ordered_image_tensors_list, k: int, distance_func, pre_comparison_transformation_func):
     remaining_images = [
         dict(
+            orig_image_index=orig_image_index,
             img_tensor=img_tensor,
             img_comparison_array=pre_comparison_transformation_func(img_tensor)
         )
-        for img_tensor in image_tensors_list
+        for orig_image_index, img_tensor in enumerate(ordered_image_tensors_list)
     ]
 
-    selected_images = [remaining_images.pop(random.randint(0, len(remaining_images) - 1))]
+    chosen_30_images_indices = [remaining_images.pop(random.randint(0, len(remaining_images) - 1))]
     for _ in tqdm(list(range(k - 1)), desc='incremental_farthest_search() main loop'):
         distances = [
             distance_func(
                 i['img_comparison_array'],
-                selected_images[0]['img_comparison_array']
+                chosen_30_images_indices[0]['img_comparison_array']
             )
             for i in remaining_images
         ]
         for i, p in enumerate(remaining_images):
-            for j, s in enumerate(selected_images):
+            for j, s in enumerate(chosen_30_images_indices):
                 distances[i] = min(distances[i], distance_func(
                     p['img_comparison_array'], s['img_comparison_array']
                 ))
-        selected_images.append(remaining_images.pop(distances.index(max(distances))))
-    selected_images = [i['img_tensor'] for i in selected_images]
-    return selected_images
+        chosen_30_images_indices.append(remaining_images.pop(distances.index(max(distances))))
+    chosen_30_images_indices = [i['orig_image_index'] for i in chosen_30_images_indices]
+    return chosen_30_images_indices
 
 
 def set_training_random_seed(seed: int):
@@ -239,13 +240,19 @@ if __name__ == '__main__':
         resized_image = resized_image[0]
         return resized_image
 
-    farthest_images_list = _incremental_farthest_search(
-        list(original_monet_dataset),
+
+    original_ordered_monet_images = list(original_monet_dataset)
+    chosen_30_images_indices = _incremental_farthest_search(
+        original_ordered_monet_images,
         k=5,
-        # distance_func=_structural_distance,
-        distance_func=_earth_movers_distance,
+        distance_func=_structural_distance,
+        # distance_func=_earth_movers_distance,
         pre_comparison_transformation_func=_pre_comparison_transformation_func
     )
+    farthest_images_list = Dataset.from_tensor_slices([
+        original_ordered_monet_images[image_idx]
+        for image_idx in chosen_30_images_indices
+    ])
 
     throw_images_to_temp_folder(
         farthest_images_list, './tmppppp_images/', unnormalize=True
