@@ -20,6 +20,7 @@ if not dependencies_already_installed:
 ##Imports
 import os
 import random
+import json
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -357,6 +358,7 @@ class CycleGan(keras.Model):
         self.disc_loss_fn = disc_loss_fn
         self.cycle_loss_fn = cycle_loss_fn
         self.identity_loss_fn = identity_loss_fn
+        self._my_hack_history = []
 
     def train_step(self, batch_data):
         real_monet, real_photo = batch_data
@@ -424,12 +426,56 @@ class CycleGan(keras.Model):
         self.p_disc_optimizer.apply_gradients(zip(photo_discriminator_gradients,
                                                   self.p_disc.trainable_variables))
 
-        return {
+        rett = {
             "monet_gen_loss": total_monet_gen_loss,
             "photo_gen_loss": total_photo_gen_loss,
             "monet_disc_loss": monet_disc_loss,
             "photo_disc_loss": photo_disc_loss
         }
+        self._my_hack_history.append(rett)
+        return rett
+
+
+#Graph plotting utils
+def plot_cycle_gan_train_losses(train_history):
+    epoch_level_train_history = {
+        loss_name: {
+            epoch: epoch_losses.flatten().mean()
+            for epoch, epoch_losses in enumerate(epochs_losses)
+        }
+        for loss_name, epochs_losses in train_history.history.items()
+    }
+
+    try:
+        fig, (top_ax, bottom_ax) = plt.subplots(2, figsize=(12, 12))
+        fig.suptitle('Loss vs Epoch')
+
+        top_ax.set_title('Generators')
+        plt_lines = []
+        for loss_name in ('monet_gen_loss', 'photo_gen_loss'):
+            loss_epoch_values = epoch_level_train_history[loss_name]
+            line, = top_ax.plot(loss_epoch_values.keys(), loss_epoch_values.values(), label=loss_name)
+            plt_lines.append(line)
+        top_ax.legend(handles=plt_lines)
+
+        bottom_ax.set_title('Discriminators')
+        plt_lines = []
+        for loss_name in ('monet_disc_loss', 'photo_disc_loss'):
+            loss_epoch_values = epoch_level_train_history[loss_name]
+            line, = bottom_ax.plot(loss_epoch_values.keys(), loss_epoch_values.values(), label=loss_name)
+            plt_lines.append(line)
+        bottom_ax.legend(handles=plt_lines)
+
+        plt.tight_layout()
+        plt.show()
+    finally:
+        plt.close()
+
+    final_losses = {
+        loss_name: str(loss_epoch_values[max(loss_epoch_values.keys())])
+        for loss_name, loss_epoch_values in epoch_level_train_history.items()
+    }
+    print(f"*** trained cycle gan final losses ***\n{json.dumps(final_losses, indent=4)}")
 
 
 """# Define loss functions
@@ -438,9 +484,6 @@ The discriminator loss function below compares real images to a matrix of 1s and
 """
 
 """# Create submission file"""
-CREATE_PREDICTIONS = True
-
-
 def create_predictions_for_kaggle_submission(monet_generator: tf.keras.Model, photo_dataset: Dataset):
     wip_images_folder = Path(f"/tmp/wip_{datetime.now().strftime('%y_%m_%d__%H_%M_%S')}/")
     wip_images_folder.mkdir(parents=True, exist_ok=True)
@@ -551,10 +594,12 @@ def experiment_flow(
 
     print(f'\n\n*** running_on_tpu - {isinstance(DEVICE_STRATEGY, TPUStrategy)} ***\n\n')
 
-    cycle_gan_model.fit(
+    train_history = cycle_gan_model.fit(
         tf.data.Dataset.zip((chosen_30_monet_dataset, photo_dataset)),
-        epochs=train_settings['train_epochs']
+        epochs=train_settings['train_epochs'],
+        verbose=2
     )
+    plot_cycle_gan_train_losses(train_history)
 
     print('*** Show trained model predictions sample ***')
     _, ax = plt.subplots(5, 2, figsize=(12, 12))
@@ -575,15 +620,16 @@ def experiment_flow(
         create_predictions_for_kaggle_submission(monet_generator, photo_dataset)
 
 
+
 experiment_flow(
     choose_30_images_strategy=dict(
         method='random_selection',
         random_seed=42
     ),
     train_settings=dict(
-        train_epochs=40,
+        train_epochs=10,
         optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001)
     ),
     experiment_random_seed=1,
-    create_kaggle_predictions_for_submission=True
+    create_kaggle_predictions_for_submission=False
 )
