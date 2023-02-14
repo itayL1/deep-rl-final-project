@@ -27,6 +27,8 @@ from tensorflow.keras import layers
 from tensorflow.python.data.ops.dataset_ops import Dataset
 from tensorflow.python.distribute.tpu_strategy import TPUStrategy
 import tensorflow_addons as tfa
+from skimage.metrics import structural_similarity
+from scipy.stats import wasserstein_distance
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
@@ -99,39 +101,94 @@ download_competition_dataset_if_not_present()
 
 
 def _choose_30_images(
-        original_monet_dataset: Dataset, choose_30_images_strategy: dict, experiment_random_seed: int
+        original_ordered_monet_dataset: Dataset, method: str,
+        experiment_random_seed: int, use_preprocessed_cache: bool
 ) -> Dataset:
-    method = choose_30_images_strategy['method']
-    selection_random_seed = choose_30_images_strategy['random_seed']
-    method_func_params = choose_30_images_strategy.get('params', None)
+    set_training_random_seed(seed=42)
 
-    np.random.seed(selection_random_seed)
     try:
-        if method == 'random_selection':
-            chosen_30_monet_dataset = _pick_random_images(
-                original_monet_ds=original_monet_dataset,
+        original_ordered_monet_images = list(original_ordered_monet_dataset)
+        if use_preprocessed_cache:
+            preprocessed_indices_cache = {
+                'random_selection': [203, 266, 152, 9, 233, 226, 196, 109, 5, 175, 237, 57, 218, 45, 182, 221, 289, 211, 148, 165, 78, 113, 249, 250, 104, 42, 281, 295, 157, 238],
+                'farthest_images_by_pixel_distance': [57, 299, 113, 74, 160, 193, 139, 283, 93, 56, 90, 196, 108, 34, 45, 40, 249, 87, 240, 106, 218, 208, 2, 289, 16, 11, 155, 52, 292, 272],
+                'closest_images_by_pixel_distance': [57, 119, 185, 203, 70, 216, 238, 61, 273, 169, 81, 222, 68, 137, 58, 67, 295, 164, 50, 217, 179, 190, 125, 290, 44, 251, 274, 195, 7, 165],
+                'farthest_images_by_structural_distance': [57, 134, 16, 152, 133, 116, 94, 147, 177, 161, 40, 9, 218, 110, 70, 101, 75, 54, 243, 100, 98, 237, 77, 115, 106, 119, 45, 261, 241, 90],
+                'closest_images_by_structural_distance': [57, 254, 238, 160, 86, 295, 187, 51, 41, 81, 273, 120, 230, 148, 25, 13, 264, 114, 236, 155, 58, 59, 151, 91, 107, 207, 289, 203, 176, 125],
+                'farthest_images_by_earth_movers_distance': [57, 168, 144, 249, 145, 117, 288, 109, 48, 207, 252, 251, 186, 278, 296, 39, 263, 234, 167, 165, 128, 41, 290, 176, 33, 107, 202, 201, 282, 127],
+                # 'closest_images_by_earth_movers_distance': [],
+            }
+            assert method in preprocessed_indices_cache, f"unknown method - '{method}'"
+            chosen_30_images_indices = preprocessed_indices_cache[method]
+        elif method == 'random_selection':
+            chosen_30_images_indices = _pick_random_images(
+                original_ordered_monet_images, images_count=30
+            )
+        elif method == 'farthest_images_by_pixel_distance':
+            chosen_30_images_indices = _pick_images_farthest_from_each_other(
+                original_ordered_monet_images,
+                distance_func=_images_pixel_distance,
                 images_count=30
             )
-        elif method == 'pick_images_farthest_from_each_other':
-            chosen_30_monet_dataset = _pick_images_farthest_from_each_other(
-                original_monet_ds=original_monet_dataset,
+        elif method == 'closest_images_by_pixel_distance':
+            chosen_30_images_indices = _pick_images_farthest_from_each_other(
+                original_ordered_monet_images,
+                distance_func=_images_pixel_distance,
+                images_count=30,
+                reverse_distance=True
+            )
+        elif method == 'farthest_images_by_structural_distance':
+            chosen_30_images_indices = _pick_images_farthest_from_each_other(
+                original_ordered_monet_images,
+                distance_func=_images_structural_distance,
                 images_count=30
+            )
+        elif method == 'closest_images_by_structural_distance':
+            chosen_30_images_indices = _pick_images_farthest_from_each_other(
+                original_ordered_monet_images,
+                distance_func=_images_structural_distance,
+                images_count=30,
+                reverse_distance=True
+            )
+        elif method == 'farthest_images_by_earth_movers_distance':
+            chosen_30_images_indices = _pick_images_farthest_from_each_other(
+                original_ordered_monet_images,
+                distance_func=_earth_movers_distance,
+                images_count=30
+            )
+        elif method == 'closest_images_by_earth_movers_distance':
+            chosen_30_images_indices = _pick_images_farthest_from_each_other(
+                original_ordered_monet_images,
+                distance_func=_earth_movers_distance,
+                images_count=30,
+                reverse_distance=True
             )
         else:
             raise NotImplementedError(f"unknown method - '{method}'")
 
-        images_shape = list(chosen_30_monet_dataset)[0].shape
+        chosen_30_images_dataset = Dataset.from_tensor_slices([
+            original_ordered_monet_images[image_idx]
+            for image_idx in chosen_30_images_indices
+        ])
+        _plot_chosen_30_images(chosen_30_images_dataset)
+    finally:
+        set_training_random_seed(experiment_random_seed)
+    assert False, f'asdsadsadsadsads\n{chosen_30_images_indices}'
+    return chosen_30_images_dataset
+
+
+def _plot_chosen_30_images(chosen_30_images_dataset):
+    try:
+        images_shape = list(chosen_30_images_dataset)[0].shape
         print(f'*** Selected 30 train monet photos (shape: {images_shape}) ***')
         _, ax = plt.subplots(30, 1, figsize=(50, 50))
-        for i, img in enumerate(chosen_30_monet_dataset):
+        for i, img in enumerate(chosen_30_images_dataset):
             img = (img * 127.5 + 127.5).numpy()[0].astype(np.uint8)
 
             ax[i].imshow(img)
         plt.show()
-
     finally:
-        np.random.seed(experiment_random_seed)
-    return chosen_30_monet_dataset
+        plt.close()
 
 
 # Load competition dataset
@@ -152,6 +209,13 @@ def find_competition_dataset_files(local_dataset_folder_path: Path):
     return monet_dataset_files, photo_dataset_files
 
 
+def _prepare_image_tensor_for_training(image):
+    image = (tf.cast(image, tf.float32) / 127.5) - 1
+    image = tf.reshape(image, [256, 256, 3])
+    image = tf.image.resize(image, (320, 320), method='bilinear')
+    return image
+
+
 def load_tf_records_dataset(tf_record_files) -> Dataset:
     def _read_and_normalize_tfrecord(record):
         tfrecord_format = {
@@ -162,14 +226,7 @@ def load_tf_records_dataset(tf_record_files) -> Dataset:
         record = tf.io.parse_single_example(record, tfrecord_format)
         image = record['image']
         image = tf.image.decode_jpeg(image, channels=3)
-        # print(f'asdsadsad: {(image.shape, type(image))}')
-        # image = tf.keras.utils.array_to_img(image)
-        # image = image.resize((320, 320))
-        # image = np.array(image)
-        # image = tf.convert_to_tensor(image)
-        image = (tf.cast(image, tf.float32) / 127.5) - 1
-        image = tf.reshape(image, [256, 256, 3])
-        image = tf.image.resize(image, (320, 320), method='bilinear')
+        image = _prepare_image_tensor_for_training(image)
         return image
 
     sorted_tf_record_files = sorted(tf_record_files)
@@ -179,40 +236,95 @@ def load_tf_records_dataset(tf_record_files) -> Dataset:
 
 
 ##Pick 30 train monet images strategies
-def _pick_images_farthest_from_each_other(original_monet_ds: Dataset, images_count: int) -> Dataset:
-    def _images_distance(im1, im2):
-        distance = np.sum((im1.numpy().flatten() - im2.numpy().flatten()) ** 2)
-        return distance
+def _pick_images_farthest_from_each_other(
+        original_ordered_monet_images: list, distance_func, images_count: int, reverse_distance: bool = False
+) -> list:
+    comparison_images_resize_shape = (100, 100)
 
-    farthest_images_list = _incremental_farthest_search(
-        list(original_monet_ds), k=images_count, distance_func=_images_distance
+    def _pre_comparison_transformation_func(image_tensor):
+        image_array = image_tensor.numpy()
+        denormalized_image = (image_array * 127.5 + 127.5)
+        resized_image = tf.image.resize(denormalized_image, comparison_images_resize_shape).numpy()
+        resized_image = resized_image.astype(np.uint8)
+        resized_image = resized_image[0]
+        return resized_image
+
+    final_distance_func = distance_func
+    if reverse_distance:
+        final_distance_func = lambda image1, image2: -distance_func(image1, image2)
+
+    chosen_30_images_indices = _incremental_farthest_search(
+        original_ordered_monet_images,
+        k=images_count,
+        distance_func=final_distance_func,
+        pre_comparison_transformation_func=_pre_comparison_transformation_func
     )
-    farthest_images_dataset = Dataset.from_tensor_slices(farthest_images_list)
-    return farthest_images_dataset
+    return chosen_30_images_indices
 
 
-def _pick_random_images(original_monet_ds: Dataset, images_count: int) -> Dataset:
-    monet_images_list = list(original_monet_ds)
-    ret_dataset = Dataset.from_tensor_slices([
-        monet_images_list[image_idx] for image_idx in
-        np.random.choice(
-            list(range(len(monet_images_list))), size=images_count, replace=False
+def _pick_random_images(original_ordered_monet_images: list, images_count: int) -> list:
+    chosen_30_images_indices = list(np.random.choice(
+        list(range(len(original_ordered_monet_images))), size=images_count, replace=False
+    ))
+    return chosen_30_images_indices
+
+
+def _incremental_farthest_search(
+        ordered_image_tensors_list, k: int, distance_func, pre_comparison_transformation_func
+):
+    remaining_images = [
+        dict(
+            orig_image_index=orig_image_index,
+            img_tensor=img_tensor,
+            img_comparison_array=pre_comparison_transformation_func(img_tensor)
         )
-    ])
-    return ret_dataset
+        for orig_image_index, img_tensor in enumerate(ordered_image_tensors_list)
+    ]
 
-
-def _incremental_farthest_search(array, k: int, distance_func):
-    remaining_points = array[:]
-    solution_set = [remaining_points.pop(random.randint(0, len(remaining_points) - 1))]
-
+    chosen_30_images_indices = [remaining_images.pop(random.randint(0, len(remaining_images) - 1))]
     for _ in tqdm(list(range(k - 1)), desc='incremental_farthest_search() main loop'):
-        distances = [distance_func(p, solution_set[0]) for p in remaining_points]
-        for i, p in enumerate(remaining_points):
-            for j, s in enumerate(solution_set):
-                distances[i] = min(distances[i], distance_func(p, s))
-        solution_set.append(remaining_points.pop(distances.index(max(distances))))
-    return solution_set
+        distances = [
+            distance_func(
+                i['img_comparison_array'],
+                chosen_30_images_indices[0]['img_comparison_array']
+            )
+            for i in remaining_images
+        ]
+        for i, p in enumerate(remaining_images):
+            for j, s in enumerate(chosen_30_images_indices):
+                distances[i] = min(distances[i], distance_func(
+                    p['img_comparison_array'], s['img_comparison_array']
+                ))
+        chosen_30_images_indices.append(remaining_images.pop(distances.index(max(distances))))
+    chosen_30_images_indices = [i['orig_image_index'] for i in chosen_30_images_indices]
+    return chosen_30_images_indices
+
+
+def _images_pixel_distance(image1: np.array, image2: np.array) -> float:
+    distance = np.sum((image1.flatten() - image2.flatten()) ** 2)
+    return distance
+
+
+def _images_structural_distance(image1: np.array, image2: np.array) -> float:
+    similarity_index, *_ = structural_similarity(image1.flatten(), image2.flatten(), full=True)
+    return -similarity_index
+
+
+def _earth_movers_distance(image1: np.array, image2: np.array) -> float:
+    image1_hist = _calc_image_greyscale_histogram(image1)
+    image2_hist = _calc_image_greyscale_histogram(image2)
+    distance = wasserstein_distance(image1_hist, image2_hist)
+    return distance
+
+
+def _calc_image_greyscale_histogram(image: np.array) -> np.array:
+    greyscale_image = np.array(Image.fromarray(image).convert('L'))
+    h, w = greyscale_image.shape
+    hist = [0.0] * 256
+    for i in range(h):
+        for j in range(w):
+            hist[greyscale_image[i, j]] += 1
+    return np.array(hist) / (h * w)
 
 
 def down_sample(filters, size, strides=2, padding='same'):
@@ -507,7 +619,7 @@ def create_predictions_for_kaggle_submission(monet_generator: tf.keras.Model, ph
 
 
 def experiment_flow(
-        choose_30_images_strategy: dict,
+        choose_30_images_method: str,
         train_settings: dict,
         experiment_random_seed: int,
         create_kaggle_predictions_for_submission: bool = False,
@@ -515,11 +627,13 @@ def experiment_flow(
     set_training_random_seed(experiment_random_seed)
 
     monet_dataset_files, photo_dataset_files = find_competition_dataset_files(LOCAL_DATASET_FOLDER_PATH)
-    original_monet_dataset = load_tf_records_dataset(monet_dataset_files).batch(1)
+    original_ordered_monet_dataset = load_tf_records_dataset(monet_dataset_files).batch(1)
     photo_dataset = load_tf_records_dataset(photo_dataset_files).batch(1)
 
-    chosen_30_monet_dataset = _choose_30_images(original_monet_dataset, choose_30_images_strategy,
-                                                experiment_random_seed)
+    chosen_30_monet_dataset = _choose_30_images(
+        original_ordered_monet_dataset, choose_30_images_method,
+        experiment_random_seed, use_preprocessed_cache=False
+    )
 
     with DEVICE_STRATEGY.scope():
         monet_generator = build_generator_model()  # transforms photos to Monet-esque paintings
@@ -622,14 +736,11 @@ def experiment_flow(
 
 
 experiment_flow(
-    choose_30_images_strategy=dict(
-        method='random_selection',
-        random_seed=42
-    ),
+    choose_30_images_method='closest_images_by_earth_movers_distance',
     train_settings=dict(
-        train_epochs=10,
+        train_epochs=40,
         optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001)
     ),
     experiment_random_seed=1,
-    create_kaggle_predictions_for_submission=False
+    create_kaggle_predictions_for_submission=True
 )

@@ -245,8 +245,8 @@ if __name__ == '__main__':
     chosen_30_images_indices = _incremental_farthest_search(
         original_ordered_monet_images,
         k=5,
-        distance_func=_structural_distance,
-        # distance_func=_earth_movers_distance,
+        # distance_func=_structural_distance,
+        distance_func=_earth_movers_distance,
         pre_comparison_transformation_func=_pre_comparison_transformation_func
     )
     farthest_images_list = Dataset.from_tensor_slices([
