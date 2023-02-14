@@ -9,9 +9,7 @@ def check_dependencies_already_installed() -> bool:
 
 
 def install_dependencies():
-    !pip
-    install
-    'tensorflow_addons' 'tensorflow-determinism' 'gdown'
+    !pip install 'tensorflow_addons' 'tensorflow-determinism' 'gdown'
 
 
 dependencies_already_installed = check_dependencies_already_installed()
@@ -71,7 +69,7 @@ def choose_strongest_available_device_strategy():
     # todo itay - delete this section so it won't mess up in google colab
     gpu_is_available = any(tf.config.list_physical_devices('GPU'))
     if gpu_is_available:
-        !nvidia - smi
+        !nvidia -smi
 
     return selected_strategy
 
