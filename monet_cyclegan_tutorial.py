@@ -2,7 +2,7 @@
 ##Installs
 def check_dependencies_already_installed() -> bool:
     try:
-        import tensorflow_addons
+        import gdown
         return True
     except ImportError:
         return False
