@@ -116,7 +116,7 @@ def _choose_30_images(
                 'farthest_images_by_structural_distance': [57, 134, 16, 152, 133, 116, 94, 147, 177, 161, 40, 9, 218, 110, 70, 101, 75, 54, 243, 100, 98, 237, 77, 115, 106, 119, 45, 261, 241, 90],
                 'closest_images_by_structural_distance': [57, 254, 238, 160, 86, 295, 187, 51, 41, 81, 273, 120, 230, 148, 25, 13, 264, 114, 236, 155, 58, 59, 151, 91, 107, 207, 289, 203, 176, 125],
                 'farthest_images_by_earth_movers_distance': [57, 168, 144, 249, 145, 117, 288, 109, 48, 207, 252, 251, 186, 278, 296, 39, 263, 234, 167, 165, 128, 41, 290, 176, 33, 107, 202, 201, 282, 127],
-                # 'closest_images_by_earth_movers_distance': [],
+                'closest_images_by_earth_movers_distance': [57, 196, 13, 131, 148, 97, 187, 74, 11, 162, 147, 240, 55, 70, 102, 76, 213, 139, 256, 253, 247, 17, 227, 108, 86, 133, 19, 77, 42, 1],
             }
             assert method in preprocessed_indices_cache, f"unknown method - '{method}'"
             chosen_30_images_indices = preprocessed_indices_cache[method]
@@ -173,7 +173,6 @@ def _choose_30_images(
         _plot_chosen_30_images(chosen_30_images_dataset)
     finally:
         set_training_random_seed(experiment_random_seed)
-    assert False, f'asdsadsadsadsads\n{chosen_30_images_indices}'
     return chosen_30_images_dataset
 
 
@@ -632,7 +631,7 @@ def experiment_flow(
 
     chosen_30_monet_dataset = _choose_30_images(
         original_ordered_monet_dataset, choose_30_images_method,
-        experiment_random_seed, use_preprocessed_cache=False
+        experiment_random_seed, use_preprocessed_cache=True
     )
 
     with DEVICE_STRATEGY.scope():
