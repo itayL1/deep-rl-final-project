@@ -43,18 +43,13 @@ def get_img(image_array, norm_size=True, norm_exposure=False):
     return img
 
 
-def get_histogram(img):
-    '''
-    Get the histogram of an image. For an 8-bit, grayscale image, the
-    histogram will be a 256 unit vector in which the nth value indicates
-    the percent of the pixels in the image with the given darkness level.
-    The histogram's values sum to 1.
-    '''
-    h, w = img.shape
+def _calc_image_greyscale_histogram(image: np.array) -> np.array:
+    greyscale_image = np.array(Image.fromarray(image).convert('L'))
+    h, w = greyscale_image.shape
     hist = [0.0] * 256
     for i in range(h):
         for j in range(w):
-            hist[img[i, j]] += 1
+            hist[greyscale_image[i, j]] += 1
     return np.array(hist) / (h * w)
 
 
@@ -63,7 +58,7 @@ def normalize_exposure(img):
     Normalize the exposure of an image.
     '''
     img = img.astype(int)
-    hist = get_histogram(img)
+    hist = _calc_image_greyscale_histogram(img)
     # get the sum of vals accumulated by each position in hist
     cdf = np.array([sum(hist[:i + 1]) for i in range(len(hist))])
     # determine the normalization values for each unit of the cdf
@@ -77,23 +72,14 @@ def normalize_exposure(img):
     return normalized.astype(int)
 
 
-def earth_movers_distance(path_a, path_b):
-    '''
-    Measure the Earth Mover's distance between two images
-    @args:
-      {str} path_a: the path to an image file
-      {str} path_b: the path to an image file
-    @returns:
-      TODO
-    '''
-    img_a = get_img(path_a, norm_exposure=True)
-    img_b = get_img(path_b, norm_exposure=True)
-    hist_a = get_histogram(img_a)
-    hist_b = get_histogram(img_b)
-    return wasserstein_distance(hist_a, hist_b)
+def _earth_movers_distance(image1: np.array, image2: np.array) -> float:
+    image1_hist = _calc_image_greyscale_histogram(image1)
+    image2_hist = _calc_image_greyscale_histogram(image2)
+    distance = wasserstein_distance(image1_hist, image2_hist)
+    return distance
 
 
-def structural_distance(image1: np.array, image2: np.array) -> float:
+def _structural_distance(image1: np.array, image2: np.array) -> float:
     similarity_index, *_ = structural_similarity(image1.flatten(), image2.flatten(), full=True)
     return -similarity_index
 
@@ -196,13 +182,11 @@ def load_tf_records_dataset(tf_record_files) -> Dataset:
     return dataset
 
 
-def _incremental_farthest_search(image_tensors_list, k: int, distance_func, resize_before_comparison_shape=None):
+def _incremental_farthest_search(image_tensors_list, k: int, distance_func, pre_comparison_transformation_func):
     remaining_images = [
         dict(
             img_tensor=img_tensor,
-            img_comparison_array=
-                tf.image.resize(img_tensor, resize_before_comparison_shape).numpy()[0]
-                if resize_before_comparison_shape else img_tensor.numpy()[0]
+            img_comparison_array=pre_comparison_transformation_func(img_tensor)
         )
         for img_tensor in image_tensors_list
     ]
@@ -245,12 +229,22 @@ if __name__ == '__main__':
     #     for image_tensor in original_monet_dataset
     # ]
 
+    comparison_images_resize_shape = (100, 100)
+
+    def _pre_comparison_transformation_func(image_tensor):
+        image_array = image_tensor.numpy()
+        denormalized_image = (image_array * 127.5 + 127.5)
+        resized_image = tf.image.resize(denormalized_image, comparison_images_resize_shape).numpy()
+        resized_image = resized_image.astype(np.uint8)
+        resized_image = resized_image[0]
+        return resized_image
+
     farthest_images_list = _incremental_farthest_search(
         list(original_monet_dataset),
-        k=30,
-        # distance_func=structural_distance,
-        distance_func=structural_distance,
-        resize_before_comparison_shape=(100, 100)
+        k=5,
+        # distance_func=_structural_distance,
+        distance_func=_earth_movers_distance,
+        pre_comparison_transformation_func=_pre_comparison_transformation_func
     )
 
     throw_images_to_temp_folder(
