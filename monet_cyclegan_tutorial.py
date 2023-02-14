@@ -91,13 +91,9 @@ def download_competition_dataset_if_not_present():
     if not dataset_already_downloaded:
         # note - this is the untouched competition dataset. just uploaded it to the drive so it'll be
         # available via colab as well.
-        !gdown
-        1
-        ZwcoO11NKhYsbuM7hzdSzKjGOnOx6X94
-        !mkdir - p
-        {LOCAL_DATASET_FOLDER_PATH}
-        !unzip - o - q. / gan - getting - started.zip - d
-        {LOCAL_DATASET_FOLDER_PATH}
+        !gdown '1ZwcoO11NKhYsbuM7hzdSzKjGOnOx6X94'
+        !mkdir -p {LOCAL_DATASET_FOLDER_PATH}
+        !unzip -o -q ./gan-getting-started.zip -d {LOCAL_DATASET_FOLDER_PATH}
 
 
 download_competition_dataset_if_not_present()
@@ -591,5 +587,5 @@ experiment_flow(
         optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001)
     ),
     experiment_random_seed=1,
-    create_kaggle_predictions_for_submission=False
+    create_kaggle_predictions_for_submission=True
 )
