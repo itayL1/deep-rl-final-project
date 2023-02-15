@@ -75,6 +75,7 @@ def choose_strongest_available_device_strategy():
     if gpu_is_available:
         !nvidia-smi
 
+    print(f'\n\n*** running_on_tpu - {isinstance(DEVICE_STRATEGY, TPUStrategy)} ***\n\n')
     return selected_strategy
 
 
@@ -111,7 +112,7 @@ class TrainImagesSelectionMethod(Enum):
     ClosestImagesByEarthMoversDistance = 'closest_images_by_earth_movers_distance'
 
 
-def _choose_30_images(
+def _choose_30_monet_train_images(
         original_ordered_monet_dataset: Dataset, method: TrainImagesSelectionMethod,
         experiment_random_seed: int, use_preprocessed_cache: bool
 ) -> Dataset:
@@ -558,7 +559,70 @@ class CycleGan(keras.Model):
         return rett
 
 
-#Graph plotting utils
+def _build_losses():
+    def identity_loss(real_image, same_image, lambda_):
+        loss = tf.reduce_mean(tf.abs(real_image - same_image))
+        return lambda_ * 0.5 * loss
+
+    def generators_loss(generated):
+        loss = tf.keras.losses.BinaryCrossentropy(
+            from_logits=True,
+            reduction=tf.keras.losses.Reduction.NONE
+        )(tf.ones_like(generated), generated)
+        return loss
+
+    def discriminators_loss(real, generated):
+        real_loss = tf.keras.losses.BinaryCrossentropy(
+            from_logits=True,
+            reduction=tf.keras.losses.Reduction.NONE
+        )(tf.ones_like(real), real)
+
+        generated_loss = tf.keras.losses.BinaryCrossentropy(
+            from_logits=True,
+            reduction=tf.keras.losses.Reduction.NONE
+        )(tf.zeros_like(generated), generated)
+
+        total_disc_loss = real_loss + generated_loss
+        return total_disc_loss * 0.5
+
+    def final_cycle_loss(real_image, cycled_image, lambda_):
+        loss1 = tf.reduce_mean(tf.abs(real_image - cycled_image))
+        return lambda_ * loss1
+
+    return identity_loss, generators_loss, discriminators_loss, final_cycle_loss
+
+
+def _build_cycle_gan_model(train_settings):
+    monet_generator = build_generator_model()
+    photo_generator = build_generator_model()
+    monet_discriminator = build_discriminator_model()
+    photo_discriminator = build_discriminator_model()
+
+    identity_loss, generators_loss, discriminators_loss, final_cycle_loss = _build_losses()
+
+    optimizer_builder = train_settings['optimizer_builder']
+    monet_generator_optimizer = optimizer_builder()
+    photo_generator_optimizer = optimizer_builder()
+    monet_discriminator_optimizer = optimizer_builder()
+    photo_discriminator_optimizer = optimizer_builder()
+
+    cycle_gan_model = CycleGan(
+        monet_generator, photo_generator, monet_discriminator, photo_discriminator
+    )
+    cycle_gan_model.compile(
+        m_gen_optimizer=monet_generator_optimizer,
+        p_gen_optimizer=photo_generator_optimizer,
+        m_disc_optimizer=monet_discriminator_optimizer,
+        p_disc_optimizer=photo_discriminator_optimizer,
+        gen_loss_fn=generators_loss,
+        disc_loss_fn=discriminators_loss,
+        cycle_loss_fn=final_cycle_loss,
+        identity_loss_fn=identity_loss
+    )
+    return cycle_gan_model, monet_generator
+
+
+#Plotting utils
 def plot_cycle_gan_train_losses(train_history):
     epoch_level_train_history = {
         loss_name: {
@@ -598,6 +662,23 @@ def plot_cycle_gan_train_losses(train_history):
         for loss_name, loss_epoch_values in epoch_level_train_history.items()
     }
     print(f"*** trained cycle gan final losses ***\n{json.dumps(final_losses, indent=4)}")
+
+
+def plot_predictions_sample(monet_generator, photo_dataset):
+    print('*** Show trained model predictions sample ***')
+    _, ax = plt.subplots(5, 2, figsize=(12, 12))
+    for i, img in enumerate(photo_dataset.take(5)):
+        prediction = monet_generator(img, training=False)[0].numpy()
+        prediction = (prediction * 127.5 + 127.5).astype(np.uint8)
+        img = (img[0] * 127.5 + 127.5).numpy().astype(np.uint8)
+
+        ax[i, 0].imshow(img)
+        ax[i, 1].imshow(prediction)
+        ax[i, 0].set_title("Input Photo")
+        ax[i, 1].set_title("Monet-esque")
+        ax[i, 0].axis("off")
+        ax[i, 1].axis("off")
+    plt.show()
 
 
 """# Define loss functions
@@ -640,105 +721,22 @@ def experiment_flow(
     original_ordered_monet_dataset = load_tf_records_dataset(monet_dataset_files).batch(1)
     photo_dataset = load_tf_records_dataset(photo_dataset_files).batch(1)
 
-    chosen_30_monet_dataset = _choose_30_images(
+    chosen_30_monet_dataset = _choose_30_monet_train_images(
         original_ordered_monet_dataset, choose_30_images_method,
         experiment_random_seed, use_preprocessed_cache=True
     )
+    train_pairs_dataset = tf.data.Dataset.zip((chosen_30_monet_dataset, photo_dataset))
 
     with DEVICE_STRATEGY.scope():
-        monet_generator = build_generator_model()  # transforms photos to Monet-esque paintings
-        photo_generator = build_generator_model()  # transforms Monet paintings to be more like photos
-
-        monet_discriminator = build_discriminator_model()  # differentiates real Monet paintings and generated Monet paintings
-        photo_discriminator = build_discriminator_model()  # differentiates real photos and generated photos
-
-    with DEVICE_STRATEGY.scope():
-        def discriminator_loss(real, generated):
-            real_loss = tf.keras.losses.BinaryCrossentropy(from_logits=True, reduction=tf.keras.losses.Reduction.NONE)(
-                tf.ones_like(real), real)
-
-            generated_loss = tf.keras.losses.BinaryCrossentropy(from_logits=True,
-                                                                reduction=tf.keras.losses.Reduction.NONE)(
-                tf.zeros_like(generated), generated)
-
-            total_disc_loss = real_loss + generated_loss
-
-            return total_disc_loss * 0.5
-
-    """The generator wants to fool the discriminator into thinking the generated image is real. The perfect generator will have the discriminator output only 1s. Thus, it compares the generated image to a matrix of 1s to find the loss."""
-
-    with DEVICE_STRATEGY.scope():
-        def generator_loss(generated):
-            return tf.keras.losses.BinaryCrossentropy(from_logits=True, reduction=tf.keras.losses.Reduction.NONE)(
-                tf.ones_like(generated), generated)
-
-    """We want our original photo and the twice transformed photo to be similar to one another. Thus, we can calculate the cycle consistency loss be finding the average of their difference."""
-
-    with DEVICE_STRATEGY.scope():
-        def calc_cycle_loss(real_image, cycled_image, lambda_):
-            loss1 = tf.reduce_mean(tf.abs(real_image - cycled_image))
-
-            return lambda_ * loss1
-
-    """The identity loss compares the image with its generator (i.e. photo with photo generator). If given a photo as input, we want it to generate the same image as the image was originally a photo. The identity loss compares the input with the output of the generator."""
-
-    with DEVICE_STRATEGY.scope():
-        def identity_loss(real_image, same_image, lambda_):
-            loss = tf.reduce_mean(tf.abs(real_image - same_image))
-            return lambda_ * 0.5 * loss
-
-    """# Train the CycleGAN
-
-    Let's compile our model. Since we used `tf.keras.Model` to build our CycleGAN, we can just ude the `fit` function to train our model.
-    """
-
-    with DEVICE_STRATEGY.scope():
-        optimizer_builder = train_settings['optimizer_builder']
-        monet_generator_optimizer = optimizer_builder()
-        photo_generator_optimizer = optimizer_builder()
-
-        monet_discriminator_optimizer = optimizer_builder()
-        photo_discriminator_optimizer = optimizer_builder()
-
-    with DEVICE_STRATEGY.scope():
-        cycle_gan_model = CycleGan(
-            monet_generator, photo_generator, monet_discriminator, photo_discriminator
-        )
-
-        cycle_gan_model.compile(
-            m_gen_optimizer=monet_generator_optimizer,
-            p_gen_optimizer=photo_generator_optimizer,
-            m_disc_optimizer=monet_discriminator_optimizer,
-            p_disc_optimizer=photo_discriminator_optimizer,
-            gen_loss_fn=generator_loss,
-            disc_loss_fn=discriminator_loss,
-            cycle_loss_fn=calc_cycle_loss,
-            identity_loss_fn=identity_loss
-        )
-
-    print(f'\n\n*** running_on_tpu - {isinstance(DEVICE_STRATEGY, TPUStrategy)} ***\n\n')
+        cycle_gan_model, monet_generator = _build_cycle_gan_model(train_settings)
 
     train_history = cycle_gan_model.fit(
-        tf.data.Dataset.zip((chosen_30_monet_dataset, photo_dataset)),
+        train_pairs_dataset,
         epochs=train_settings['train_epochs'],
         verbose=2
     )
     plot_cycle_gan_train_losses(train_history)
-
-    print('*** Show trained model predictions sample ***')
-    _, ax = plt.subplots(5, 2, figsize=(12, 12))
-    for i, img in enumerate(photo_dataset.take(5)):
-        prediction = monet_generator(img, training=False)[0].numpy()
-        prediction = (prediction * 127.5 + 127.5).astype(np.uint8)
-        img = (img[0] * 127.5 + 127.5).numpy().astype(np.uint8)
-
-        ax[i, 0].imshow(img)
-        ax[i, 1].imshow(prediction)
-        ax[i, 0].set_title("Input Photo")
-        ax[i, 1].set_title("Monet-esque")
-        ax[i, 0].axis("off")
-        ax[i, 1].axis("off")
-    plt.show()
+    plot_predictions_sample(monet_generator, photo_dataset)
 
     if create_kaggle_predictions_for_submission:
         create_predictions_for_kaggle_submission(monet_generator, photo_dataset)
