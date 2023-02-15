@@ -884,8 +884,8 @@ def experiment_flow(
 class ExperimentsToRunConfig:
     CHOOSE_30_TRAIN_IMAGES_EXPERIMENT = False
     GENERATOR_NETWORK_STRUCTURE_EXPERIMENT = False
-    DISCRIMINATOR_NETWORK_STRUCTURE_EXPERIMENT = False
-    ITAY_TO_DELETE_EXPERIMENT = True
+    DISCRIMINATOR_NETWORK_STRUCTURE_EXPERIMENT = True
+    ITAY_TO_DELETE_EXPERIMENT = False
 
 
 def run_choose_30_train_images_experiment():
@@ -936,7 +936,7 @@ def run_discriminator_network_structure_experiment():
                 train_settings=dict(
                     train_epochs=40,
                     optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001),
-                    generator_network_structure=NotImplemented,
+                    generator_network_structure=GeneratorNetworkStructure.Thin,
                     discriminator_network_structure=discriminator_network_structure
                 ),
                 experiment_random_seed=1,
@@ -951,8 +951,8 @@ def run_itay_to_delete_experiment():
         train_settings=dict(
             train_epochs=40,
             optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001),
-            generator_network_structure=GeneratorNetworkStructure.Wide,
-            discriminator_network_structure=DiscriminatorNetworkStructure.ThinNetwork
+            generator_network_structure=GeneratorNetworkStructure.Thin,
+            discriminator_network_structure=DiscriminatorNetworkStructure.Baseline
         ),
         experiment_random_seed=1,
         create_kaggle_predictions_for_submission=True
