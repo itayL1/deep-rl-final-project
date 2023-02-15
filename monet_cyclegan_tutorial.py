@@ -21,6 +21,7 @@ if not dependencies_already_installed:
 import os
 import random
 import json
+from enum import Enum
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -99,9 +100,19 @@ def download_competition_dataset_if_not_present():
 
 download_competition_dataset_if_not_present()
 
+#Choose 30 monet train images
+class TrainImagesSelectionMethod(Enum):
+    RandomSelection = 'random_selection'
+    FarthestImagesByPixelDistance = 'farthest_images_by_pixel_distance'
+    ClosestImagesByPixelDistance = 'closest_images_by_pixel_distance'
+    FarthestImagesByStructuralDistance = 'farthest_images_by_structural_distance'
+    ClosestImagesByStructuralDistance = 'closest_images_by_structural_distance'
+    FarthestImagesByEarthMoversDistance = 'farthest_images_by_earth_movers_distance'
+    ClosestImagesByEarthMoversDistance = 'closest_images_by_earth_movers_distance'
+
 
 def _choose_30_images(
-        original_ordered_monet_dataset: Dataset, method: str,
+        original_ordered_monet_dataset: Dataset, method: TrainImagesSelectionMethod,
         experiment_random_seed: int, use_preprocessed_cache: bool
 ) -> Dataset:
     set_training_random_seed(seed=42)
@@ -110,53 +121,53 @@ def _choose_30_images(
         original_ordered_monet_images = list(original_ordered_monet_dataset)
         if use_preprocessed_cache:
             preprocessed_indices_cache = {
-                'random_selection': [203, 266, 152, 9, 233, 226, 196, 109, 5, 175, 237, 57, 218, 45, 182, 221, 289, 211, 148, 165, 78, 113, 249, 250, 104, 42, 281, 295, 157, 238],
-                'farthest_images_by_pixel_distance': [57, 299, 113, 74, 160, 193, 139, 283, 93, 56, 90, 196, 108, 34, 45, 40, 249, 87, 240, 106, 218, 208, 2, 289, 16, 11, 155, 52, 292, 272],
-                'closest_images_by_pixel_distance': [57, 119, 185, 203, 70, 216, 238, 61, 273, 169, 81, 222, 68, 137, 58, 67, 295, 164, 50, 217, 179, 190, 125, 290, 44, 251, 274, 195, 7, 165],
-                'farthest_images_by_structural_distance': [57, 134, 16, 152, 133, 116, 94, 147, 177, 161, 40, 9, 218, 110, 70, 101, 75, 54, 243, 100, 98, 237, 77, 115, 106, 119, 45, 261, 241, 90],
-                'closest_images_by_structural_distance': [57, 254, 238, 160, 86, 295, 187, 51, 41, 81, 273, 120, 230, 148, 25, 13, 264, 114, 236, 155, 58, 59, 151, 91, 107, 207, 289, 203, 176, 125],
-                'farthest_images_by_earth_movers_distance': [57, 168, 144, 249, 145, 117, 288, 109, 48, 207, 252, 251, 186, 278, 296, 39, 263, 234, 167, 165, 128, 41, 290, 176, 33, 107, 202, 201, 282, 127],
-                'closest_images_by_earth_movers_distance': [57, 196, 13, 131, 148, 97, 187, 74, 11, 162, 147, 240, 55, 70, 102, 76, 213, 139, 256, 253, 247, 17, 227, 108, 86, 133, 19, 77, 42, 1],
+                TrainImagesSelectionMethod.RandomSelection: [203, 266, 152, 9, 233, 226, 196, 109, 5, 175, 237, 57, 218, 45, 182, 221, 289, 211, 148, 165, 78, 113, 249, 250, 104, 42, 281, 295, 157, 238],
+                TrainImagesSelectionMethod.FarthestImagesByPixelDistance: [57, 299, 113, 74, 160, 193, 139, 283, 93, 56, 90, 196, 108, 34, 45, 40, 249, 87, 240, 106, 218, 208, 2, 289, 16, 11, 155, 52, 292, 272],
+                TrainImagesSelectionMethod.ClosestImagesByPixelDistance: [57, 119, 185, 203, 70, 216, 238, 61, 273, 169, 81, 222, 68, 137, 58, 67, 295, 164, 50, 217, 179, 190, 125, 290, 44, 251, 274, 195, 7, 165],
+                TrainImagesSelectionMethod.FarthestImagesByStructuralDistance: [57, 134, 16, 152, 133, 116, 94, 147, 177, 161, 40, 9, 218, 110, 70, 101, 75, 54, 243, 100, 98, 237, 77, 115, 106, 119, 45, 261, 241, 90],
+                TrainImagesSelectionMethod.ClosestImagesByStructuralDistance: [57, 254, 238, 160, 86, 295, 187, 51, 41, 81, 273, 120, 230, 148, 25, 13, 264, 114, 236, 155, 58, 59, 151, 91, 107, 207, 289, 203, 176, 125],
+                TrainImagesSelectionMethod.FarthestImagesByEarthMoversDistance: [57, 168, 144, 249, 145, 117, 288, 109, 48, 207, 252, 251, 186, 278, 296, 39, 263, 234, 167, 165, 128, 41, 290, 176, 33, 107, 202, 201, 282, 127],
+                TrainImagesSelectionMethod.ClosestImagesByEarthMoversDistance: [57, 196, 13, 131, 148, 97, 187, 74, 11, 162, 147, 240, 55, 70, 102, 76, 213, 139, 256, 253, 247, 17, 227, 108, 86, 133, 19, 77, 42, 1],
             }
             assert method in preprocessed_indices_cache, f"unknown method - '{method}'"
             chosen_30_images_indices = preprocessed_indices_cache[method]
-        elif method == 'random_selection':
+        elif method is TrainImagesSelectionMethod.RandomSelection:
             chosen_30_images_indices = _pick_random_images(
                 original_ordered_monet_images, images_count=30
             )
-        elif method == 'farthest_images_by_pixel_distance':
+        elif method is TrainImagesSelectionMethod.FarthestImagesByPixelDistance:
             chosen_30_images_indices = _pick_images_farthest_from_each_other(
                 original_ordered_monet_images,
                 distance_func=_images_pixel_distance,
                 images_count=30
             )
-        elif method == 'closest_images_by_pixel_distance':
+        elif method is TrainImagesSelectionMethod.ClosestImagesByPixelDistance:
             chosen_30_images_indices = _pick_images_farthest_from_each_other(
                 original_ordered_monet_images,
                 distance_func=_images_pixel_distance,
                 images_count=30,
                 reverse_distance=True
             )
-        elif method == 'farthest_images_by_structural_distance':
+        elif method is TrainImagesSelectionMethod.FarthestImagesByStructuralDistance:
             chosen_30_images_indices = _pick_images_farthest_from_each_other(
                 original_ordered_monet_images,
                 distance_func=_images_structural_distance,
                 images_count=30
             )
-        elif method == 'closest_images_by_structural_distance':
+        elif method is TrainImagesSelectionMethod.ClosestImagesByStructuralDistance:
             chosen_30_images_indices = _pick_images_farthest_from_each_other(
                 original_ordered_monet_images,
                 distance_func=_images_structural_distance,
                 images_count=30,
                 reverse_distance=True
             )
-        elif method == 'farthest_images_by_earth_movers_distance':
+        elif method is TrainImagesSelectionMethod.FarthestImagesByEarthMoversDistance:
             chosen_30_images_indices = _pick_images_farthest_from_each_other(
                 original_ordered_monet_images,
                 distance_func=_earth_movers_distance,
                 images_count=30
             )
-        elif method == 'closest_images_by_earth_movers_distance':
+        elif method is TrainImagesSelectionMethod.ClosestImagesByEarthMoversDistance:
             chosen_30_images_indices = _pick_images_farthest_from_each_other(
                 original_ordered_monet_images,
                 distance_func=_earth_movers_distance,
@@ -618,7 +629,7 @@ def create_predictions_for_kaggle_submission(monet_generator: tf.keras.Model, ph
 
 
 def experiment_flow(
-        choose_30_images_method: str,
+        choose_30_images_method: TrainImagesSelectionMethod,
         train_settings: dict,
         experiment_random_seed: int,
         create_kaggle_predictions_for_submission: bool = False,
@@ -733,27 +744,44 @@ def experiment_flow(
         create_predictions_for_kaggle_submission(monet_generator, photo_dataset)
 
 
-choose_30_images_methods = (
-    'random_selection',
-    'farthest_images_by_pixel_distance',
-    'closest_images_by_pixel_distance',
-    'farthest_images_by_structural_distance',
-    'closest_images_by_structural_distance',
-    'farthest_images_by_earth_movers_distance',
-    'closest_images_by_earth_movers_distance',
-)
+#Experiments
+##Experiment functions
+class ExperimentsToRunConfig:
+    CHOOSE_30_TRAIN_IMAGES_EXPERIMENT = False
+    ITAY_TO_DELETE_EXPERIMENT = True
 
-base_desc = 'choose_30_images_methods loop'
-with tqdm(total=len(choose_30_images_methods), desc=base_desc) as pbar:
-    for method in choose_30_images_methods:
-        pbar.set_description(f"{base_desc} (curr_method = '{method}')")
-        experiment_flow(
-            choose_30_images_method=method,
-            train_settings=dict(
-                train_epochs=40,
-                optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001)
-            ),
-            experiment_random_seed=1,
-            create_kaggle_predictions_for_submission=False
-        )
-        pbar.update()
+
+def run_choose_30_train_images_experiment():
+    base_desc = 'choose_30_images_methods loop'
+    with tqdm(total=len(TrainImagesSelectionMethod), desc=base_desc) as pbar:
+        for method in TrainImagesSelectionMethod:
+            pbar.set_description(f"{base_desc} (curr_method = '{method}')")
+            experiment_flow(
+                choose_30_images_method=method,
+                train_settings=dict(
+                    train_epochs=40,
+                    optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001)
+                ),
+                experiment_random_seed=1,
+                create_kaggle_predictions_for_submission=False
+            )
+            pbar.update()
+
+
+def run_itay_to_delete_experiment():
+    experiment_flow(
+        choose_30_images_method=TrainImagesSelectionMethod.FarthestImagesByEarthMoversDistance,
+        train_settings=dict(
+            train_epochs=40,
+            optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001)
+        ),
+        experiment_random_seed=1,
+        create_kaggle_predictions_for_submission=True
+    )
+
+
+##Experiment execution
+if ExperimentsToRunConfig.CHOOSE_30_TRAIN_IMAGES_EXPERIMENT:
+    run_choose_30_train_images_experiment()
+if ExperimentsToRunConfig.ITAY_TO_DELETE_EXPERIMENT:
+    run_itay_to_delete_experiment()
