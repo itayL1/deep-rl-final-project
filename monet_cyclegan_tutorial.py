@@ -770,7 +770,7 @@ def run_choose_30_train_images_experiment():
 
 def run_itay_to_delete_experiment():
     experiment_flow(
-        choose_30_images_method=TrainImagesSelectionMethod.FarthestImagesByEarthMoversDistance,
+        choose_30_images_method=TrainImagesSelectionMethod.FarthestImagesByPixelDistance,
         train_settings=dict(
             train_epochs=40,
             optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001)
