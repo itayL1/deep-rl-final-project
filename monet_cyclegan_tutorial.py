@@ -339,7 +339,7 @@ def _calc_image_greyscale_histogram(image: np.array) -> np.array:
     return np.array(hist) / (h * w)
 
 
-def down_sample(filters, size, strides=2, padding='same'):
+def down_sample_layer(filters, size, strides=2, padding='same'):
     initializer = tf.random_normal_initializer(0., 0.02)
 
     network = keras.Sequential()
@@ -351,7 +351,7 @@ def down_sample(filters, size, strides=2, padding='same'):
     return network
 
 
-def up_sample(filters, size, strides=2, padding='same', apply_dropout=False):
+def up_sample_layer(filters, size, strides=2, padding='same', apply_dropout=False):
     network = keras.Sequential()
     network.add(layers.Conv2DTranspose(
         filters, size, strides=strides, padding=padding, use_bias=False,
@@ -368,6 +368,14 @@ class GeneratorNetworkStructure(Enum):
     Thin = 'thin'
     Wide = 'wide'
     Deep = 'deep'
+
+
+class DiscriminatorNetworkStructure(Enum):
+    Baseline = 'baseline'
+    ThinNetwork = 'thin_network'
+    WideNetwork = 'wide_network'
+    ThinReceptiveField = 'thin_receptive_field'
+    WideReceptiveField = 'wide_receptive_field'
 
 
 def build_generator_model(generator_network_structure: GeneratorNetworkStructure):
@@ -400,94 +408,94 @@ def _build_generator_encoder_decoder_layout(network_structure: GeneratorNetworkS
     if network_structure is GeneratorNetworkStructure.Baseline:
         # bs = batch size
         down_stack = [
-            down_sample(64, 4),  # (bs, 160, 160, 64)
-            down_sample(128, 4),  # (bs, 80, 80, 128)
-            down_sample(256, 4),  # (bs, 40, 40, 256)
-            down_sample(512, 4),  # (bs, 20, 20, 512)
-            down_sample(512, 4),  # (bs, 10, 10, 512)
-            down_sample(512, 4),  # (bs, 5, 5, 512)
-            down_sample(512, 4, strides=1, padding='valid'),  # (bs, 2, 2, 512)
-            down_sample(512, 4),  # (bs, 1, 1, 512)
+            down_sample_layer(64, 4),  # (bs, 160, 160, 64)
+            down_sample_layer(128, 4),  # (bs, 80, 80, 128)
+            down_sample_layer(256, 4),  # (bs, 40, 40, 256)
+            down_sample_layer(512, 4),  # (bs, 20, 20, 512)
+            down_sample_layer(512, 4),  # (bs, 10, 10, 512)
+            down_sample_layer(512, 4),  # (bs, 5, 5, 512)
+            down_sample_layer(512, 4, strides=1, padding='valid'),  # (bs, 2, 2, 512)
+            down_sample_layer(512, 4),  # (bs, 1, 1, 512)
         ]
         up_stack = [
-            up_sample(512, 4, apply_dropout=True),  # (bs, 2, 2, 1024)
-            up_sample(512, 4, strides=1, padding='valid', apply_dropout=True),  # (bs, 5, 5, 1024)
-            up_sample(512, 4, apply_dropout=True),  # (bs, 10, 10, 1024)
-            up_sample(512, 4),  # (bs, 20, 20, 1024)
-            up_sample(256, 4),  # (bs, 40, 40, 512)
-            up_sample(128, 4),  # (bs, 80, 80, 256)
-            up_sample(64, 4),  # (bs, 160, 160, 128)
+            up_sample_layer(512, 4, apply_dropout=True),  # (bs, 2, 2, 1024)
+            up_sample_layer(512, 4, strides=1, padding='valid', apply_dropout=True),  # (bs, 5, 5, 1024)
+            up_sample_layer(512, 4, apply_dropout=True),  # (bs, 10, 10, 1024)
+            up_sample_layer(512, 4),  # (bs, 20, 20, 1024)
+            up_sample_layer(256, 4),  # (bs, 40, 40, 512)
+            up_sample_layer(128, 4),  # (bs, 80, 80, 256)
+            up_sample_layer(64, 4),  # (bs, 160, 160, 128)
         ]
     elif network_structure is GeneratorNetworkStructure.Thin:
         # bs = batch size
         down_stack = [
-            down_sample(64, 4),  # (bs, 160, 160, 64)
-            down_sample(128, 4),  # (bs, 80, 80, 128)
-            down_sample(128, 4),  # (bs, 40, 40, 128)
-            down_sample(256, 4),  # (bs, 20, 20, 256)
-            down_sample(256, 4),  # (bs, 10, 10, 256)
-            down_sample(256, 4),  # (bs, 5, 5, 256)
-            down_sample(512, 4, strides=1, padding='valid'),  # (bs, 2, 2, 512)
-            down_sample(512, 4),  # (bs, 1, 1, 512)
+            down_sample_layer(64, 4),  # (bs, 160, 160, 64)
+            down_sample_layer(128, 4),  # (bs, 80, 80, 128)
+            down_sample_layer(128, 4),  # (bs, 40, 40, 128)
+            down_sample_layer(256, 4),  # (bs, 20, 20, 256)
+            down_sample_layer(256, 4),  # (bs, 10, 10, 256)
+            down_sample_layer(256, 4),  # (bs, 5, 5, 256)
+            down_sample_layer(512, 4, strides=1, padding='valid'),  # (bs, 2, 2, 512)
+            down_sample_layer(512, 4),  # (bs, 1, 1, 512)
         ]
         up_stack = [
-            up_sample(512, 4, apply_dropout=True),  # (bs, 2, 2, 1024)
-            up_sample(512, 4, strides=1, padding='valid', apply_dropout=True),  # (bs, 5, 5, 1024)
-            up_sample(256, 4, apply_dropout=True),  # (bs, 10, 10, 512)
-            up_sample(256, 4),  # (bs, 20, 20, 512)
-            up_sample(128, 4),  # (bs, 40, 40, 256)
-            up_sample(128, 4),  # (bs, 80, 80, 256)
-            up_sample(64, 4),  # (bs, 160, 160, 128)
+            up_sample_layer(512, 4, apply_dropout=True),  # (bs, 2, 2, 1024)
+            up_sample_layer(512, 4, strides=1, padding='valid', apply_dropout=True),  # (bs, 5, 5, 1024)
+            up_sample_layer(256, 4, apply_dropout=True),  # (bs, 10, 10, 512)
+            up_sample_layer(256, 4),  # (bs, 20, 20, 512)
+            up_sample_layer(128, 4),  # (bs, 40, 40, 256)
+            up_sample_layer(128, 4),  # (bs, 80, 80, 256)
+            up_sample_layer(64, 4),  # (bs, 160, 160, 128)
         ]
     elif network_structure is GeneratorNetworkStructure.Wide:
         # bs = batch size
         down_stack = [
-            down_sample(64, 4),  # (bs, 160, 160, 64)
-            down_sample(256, 4),  # (bs, 80, 80, 256)
-            down_sample(512, 4),  # (bs, 40, 40, 512)
-            down_sample(1_024, 4),  # (bs, 20, 20, 1_024)
-            down_sample(1_024, 4),  # (bs, 10, 10, 1_024)
-            down_sample(1_024, 4),  # (bs, 5, 5, 1_024)
-            down_sample(1_024, 4, strides=1, padding='valid'),  # (bs, 2, 2, 1_024)
-            down_sample(512, 4),  # (bs, 1, 1, 512)
+            down_sample_layer(64, 4),  # (bs, 160, 160, 64)
+            down_sample_layer(256, 4),  # (bs, 80, 80, 256)
+            down_sample_layer(512, 4),  # (bs, 40, 40, 512)
+            down_sample_layer(1_024, 4),  # (bs, 20, 20, 1_024)
+            down_sample_layer(1_024, 4),  # (bs, 10, 10, 1_024)
+            down_sample_layer(1_024, 4),  # (bs, 5, 5, 1_024)
+            down_sample_layer(1_024, 4, strides=1, padding='valid'),  # (bs, 2, 2, 1_024)
+            down_sample_layer(512, 4),  # (bs, 1, 1, 512)
         ]
         up_stack = [
-            up_sample(1_024, 4, apply_dropout=True),  # (bs, 2, 2, 2048)
-            up_sample(1_024, 4, strides=1, padding='valid', apply_dropout=True),  # (bs, 5, 5, 2048)
-            up_sample(1_024, 4, apply_dropout=True),  # (bs, 10, 10, 2048)
-            up_sample(1_024, 4),  # (bs, 20, 20, 2048)
-            up_sample(512, 4),  # (bs, 40, 40, 1024)
-            up_sample(256, 4),  # (bs, 80, 80, 512)
-            up_sample(64, 4),  # (bs, 160, 160, 128)
+            up_sample_layer(1_024, 4, apply_dropout=True),  # (bs, 2, 2, 2048)
+            up_sample_layer(1_024, 4, strides=1, padding='valid', apply_dropout=True),  # (bs, 5, 5, 2048)
+            up_sample_layer(1_024, 4, apply_dropout=True),  # (bs, 10, 10, 2048)
+            up_sample_layer(1_024, 4),  # (bs, 20, 20, 2048)
+            up_sample_layer(512, 4),  # (bs, 40, 40, 1024)
+            up_sample_layer(256, 4),  # (bs, 80, 80, 512)
+            up_sample_layer(64, 4),  # (bs, 160, 160, 128)
         ]
     elif network_structure is GeneratorNetworkStructure.Deep:
         # bs = batch size
         down_stack = [
-            down_sample(64, 4),  # (bs, 160, 160, 64)
-            down_sample(128, 4),  # (bs, 80, 80, 128)
-            down_sample(128, 4, strides=1, padding='same'),  # (bs, 80, 80, 128)
-            down_sample(256, 4),  # (bs, 40, 40, 256)
-            down_sample(256, 4, strides=1, padding='same'),  # (bs, 40, 40, 256)
-            down_sample(512, 4),  # (bs, 20, 20, 512)
-            down_sample(512, 4, strides=1, padding='same'),  # (bs, 20, 20, 512)
-            down_sample(512, 4),  # (bs, 10, 10, 512)
-            down_sample(512, 4, strides=1, padding='same'),  # (bs, 10, 10, 512)
-            down_sample(512, 4),  # (bs, 5, 5, 512)
-            down_sample(512, 4, strides=1, padding='valid'),  # (bs, 2, 2, 512)
-            down_sample(512, 4),  # (bs, 1, 1, 512)
+            down_sample_layer(64, 4),  # (bs, 160, 160, 64)
+            down_sample_layer(128, 4),  # (bs, 80, 80, 128)
+            down_sample_layer(128, 4, strides=1, padding='same'),  # (bs, 80, 80, 128)
+            down_sample_layer(256, 4),  # (bs, 40, 40, 256)
+            down_sample_layer(256, 4, strides=1, padding='same'),  # (bs, 40, 40, 256)
+            down_sample_layer(512, 4),  # (bs, 20, 20, 512)
+            down_sample_layer(512, 4, strides=1, padding='same'),  # (bs, 20, 20, 512)
+            down_sample_layer(512, 4),  # (bs, 10, 10, 512)
+            down_sample_layer(512, 4, strides=1, padding='same'),  # (bs, 10, 10, 512)
+            down_sample_layer(512, 4),  # (bs, 5, 5, 512)
+            down_sample_layer(512, 4, strides=1, padding='valid'),  # (bs, 2, 2, 512)
+            down_sample_layer(512, 4),  # (bs, 1, 1, 512)
         ]
         up_stack = [
-            up_sample(512, 4, apply_dropout=True),  # (bs, 2, 2, 1024)
-            up_sample(512, 4, strides=1, padding='valid', apply_dropout=True),  # (bs, 5, 5, 1024)
-            up_sample(512, 4, apply_dropout=True),  # (bs, 10, 10, 1024)
-            up_sample(512, 4, strides=1, padding='same'),  # (bs, 10, 10, 1024)
-            up_sample(512, 4),  # (bs, 20, 20, 1024)
-            up_sample(512, 4, strides=1, padding='same'),  # (bs, 20, 20, 1024)
-            up_sample(256, 4),  # (bs, 40, 40, 512)
-            up_sample(256, 4, strides=1, padding='same'),  # (bs, 40, 40, 512)
-            up_sample(128, 4),  # (bs, 80, 80, 256)
-            up_sample(128, 4, strides=1, padding='same'),  # (bs, 80, 80, 256)
-            up_sample(64, 4),  # (bs, 160, 160, 128)
+            up_sample_layer(512, 4, apply_dropout=True),  # (bs, 2, 2, 1024)
+            up_sample_layer(512, 4, strides=1, padding='valid', apply_dropout=True),  # (bs, 5, 5, 1024)
+            up_sample_layer(512, 4, apply_dropout=True),  # (bs, 10, 10, 1024)
+            up_sample_layer(512, 4, strides=1, padding='same'),  # (bs, 10, 10, 1024)
+            up_sample_layer(512, 4),  # (bs, 20, 20, 1024)
+            up_sample_layer(512, 4, strides=1, padding='same'),  # (bs, 20, 20, 1024)
+            up_sample_layer(256, 4),  # (bs, 40, 40, 512)
+            up_sample_layer(256, 4, strides=1, padding='same'),  # (bs, 40, 40, 512)
+            up_sample_layer(128, 4),  # (bs, 80, 80, 256)
+            up_sample_layer(128, 4, strides=1, padding='same'),  # (bs, 80, 80, 256)
+            up_sample_layer(64, 4),  # (bs, 160, 160, 128)
         ]
     else:
         raise NotImplementedError(f"unknown network structure - '{network_structure}'")
@@ -500,17 +508,17 @@ The discriminator takes in the input image and classifies it as real or fake (ge
 """
 
 
-def build_discriminator_model():
-    initializer = tf.random_normal_initializer(0., 0.02)
+def build_discriminator_model(discriminator_network_structure: DiscriminatorNetworkStructure):
+    # todo itay delete dimensions comments
+
     inp = layers.Input(shape=[320, 320, 3], name='input_image')
-
+    conv_layers_layout = _build_patch_discriminator_conv_layers_layout(discriminator_network_structure)
     x = inp
-    down1 = down_sample(64, 5)(x)  # (bs, 160, 160, 64)
-    down2 = down_sample(128, 4)(down1)  # (bs, 80, 80, 128)
-    down3 = down_sample(256, 3)(down2)  # (bs, 40, 40, 256)
-    down4 = down_sample(256, 2)(down3)  # (bs, 20, 20, 256)
+    for down_conv in conv_layers_layout:
+        x = down_conv(x)
 
-    zero_pad1 = layers.ZeroPadding2D()(down4)  # (bs, 34, 34, 256)
+    zero_pad1 = layers.ZeroPadding2D()(x)  # (bs, 34, 34, 256)
+    initializer = tf.random_normal_initializer(0.0, 0.02)
     conv = layers.Conv2D(512, 4, strides=1,
                          kernel_initializer=initializer,
                          use_bias=False)(zero_pad1)  # (bs, 31, 31, 512)
@@ -522,6 +530,54 @@ def build_discriminator_model():
 
     discriminator_model = tf.keras.Model(inputs=inp, outputs=last)
     return discriminator_model
+
+
+def _build_patch_discriminator_conv_layers_layout(network_structure: DiscriminatorNetworkStructure):
+    # todo itay delete dimensions comments
+
+    if network_structure is DiscriminatorNetworkStructure.Baseline:
+        # final receptive filed size = 123
+        conv_layers_layout = [
+            down_sample_layer(64, 5),  # (bs, 160, 160, 64)
+            down_sample_layer(128, 4),  # (bs, 80, 80, 128)
+            down_sample_layer(256, 3),  # (bs, 40, 40, 256)
+            down_sample_layer(256, 2),  # (bs, 20, 20, 256)
+        ]
+    elif network_structure is DiscriminatorNetworkStructure.ThinNetwork:
+        # final receptive filed size = 123
+        conv_layers_layout = [
+            down_sample_layer(32, 5),  # (bs, 160, 160, 32)
+            down_sample_layer(64, 4),  # (bs, 80, 80, 64)
+            down_sample_layer(128, 3),  # (bs, 40, 40, 128)
+            down_sample_layer(256, 2),  # (bs, 20, 20, 256)
+        ]
+    elif network_structure is DiscriminatorNetworkStructure.WideNetwork:
+        # final receptive filed size = 123
+        conv_layers_layout = [
+            down_sample_layer(128, 5),  # (bs, 160, 160, 64)
+            down_sample_layer(256, 4),  # (bs, 80, 80, 128)
+            down_sample_layer(512, 3),  # (bs, 40, 40, 256)
+            down_sample_layer(256, 2),  # (bs, 20, 20, 256)
+        ]
+    elif network_structure is DiscriminatorNetworkStructure.ThinReceptiveField:
+        # final receptive filed size = 47
+        conv_layers_layout = [
+            down_sample_layer(64, size=3, strides=2),  # (bs, 160, 160, 64)
+            down_sample_layer(128, size=3, strides=2),  # (bs, 80, 80, 128)
+            down_sample_layer(256, size=3, strides=1),  # (bs, 40, 40, 256)
+            down_sample_layer(256, size=3, strides=1),  # (bs, 20, 20, 256)
+        ]
+    elif network_structure is DiscriminatorNetworkStructure.WideReceptiveField:
+        # final receptive filed size = 310
+        conv_layers_layout = [
+            down_sample_layer(64, size=4, strides=3),  # (bs, 160, 160, 64)
+            down_sample_layer(128, size=4, strides=3),  # (bs, 80, 80, 128)
+            down_sample_layer(256, size=4, strides=2),  # (bs, 40, 40, 256)
+            down_sample_layer(256, size=4, strides=2),  # (bs, 20, 20, 256)
+        ]
+    else:
+        raise NotImplementedError(f"unknown network structure - '{network_structure}'")
+    return conv_layers_layout
 
 
 class CycleGan(keras.Model):
@@ -673,10 +729,11 @@ def _build_losses():
 
 def _build_cycle_gan_model(train_settings):
     generator_network_structure = train_settings['generator_network_structure']
+    discriminator_network_structure = train_settings['discriminator_network_structure']
     monet_generator = build_generator_model(generator_network_structure)
     photo_generator = build_generator_model(generator_network_structure)
-    monet_discriminator = build_discriminator_model()
-    photo_discriminator = build_discriminator_model()
+    monet_discriminator = build_discriminator_model(discriminator_network_structure)
+    photo_discriminator = build_discriminator_model(discriminator_network_structure)
 
     identity_loss, generators_loss, discriminators_loss, final_cycle_loss = _build_losses()
 
@@ -827,6 +884,7 @@ def experiment_flow(
 class ExperimentsToRunConfig:
     CHOOSE_30_TRAIN_IMAGES_EXPERIMENT = False
     GENERATOR_NETWORK_STRUCTURE_EXPERIMENT = False
+    DISCRIMINATOR_NETWORK_STRUCTURE_EXPERIMENT = False
     ITAY_TO_DELETE_EXPERIMENT = True
 
 
@@ -840,7 +898,8 @@ def run_choose_30_train_images_experiment():
                 train_settings=dict(
                     train_epochs=40,
                     optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001),
-                    generator_network_structure=GeneratorNetworkStructure.Baseline
+                    generator_network_structure=GeneratorNetworkStructure.Baseline,
+                    discriminator_network_structure=DiscriminatorNetworkStructure.Baseline
                 ),
                 experiment_random_seed=1,
                 create_kaggle_predictions_for_submission=False
@@ -850,27 +909,35 @@ def run_choose_30_train_images_experiment():
 
 def run_generator_network_structure_experiment():
     base_desc = 'generator_network_structure_experiment loop'
-    run_combinations = [
-        dict(
-            generator_network_structure=generator_network_structure,
-            train_images_selection_method=train_images_selection_method
-        )
-        for generator_network_structure in GeneratorNetworkStructure
-        for train_images_selection_method in (
-            TrainImagesSelectionMethod.RandomSelection,
-            TrainImagesSelectionMethod.FarthestImagesByPixelDistance
-        )
-    ]
-
-    with tqdm(total=len(run_combinations), desc=base_desc) as pbar:
-        for run_combination in run_combinations:
-            pbar.set_description(f"{base_desc} (run_combination={run_combination})")
+    with tqdm(total=len(GeneratorNetworkStructure), desc=base_desc) as pbar:
+        for generator_network_structure in GeneratorNetworkStructure:
+            pbar.set_description(f"{base_desc} (generator_network_structure={generator_network_structure})")
             experiment_flow(
-                choose_30_images_method=run_combination['train_images_selection_method'],
+                choose_30_images_method=TrainImagesSelectionMethod.FarthestImagesByPixelDistance,
                 train_settings=dict(
                     train_epochs=40,
                     optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001),
-                    generator_network_structure=run_combination['generator_network_structure']
+                    generator_network_structure=generator_network_structure,
+                    discriminator_network_structure=DiscriminatorNetworkStructure.Baseline
+                ),
+                experiment_random_seed=1,
+                create_kaggle_predictions_for_submission=False
+            )
+            pbar.update()
+
+
+def run_discriminator_network_structure_experiment():
+    base_desc = 'run_discriminator_network_structure_experiment loop'
+    with tqdm(total=len(DiscriminatorNetworkStructure), desc=base_desc) as pbar:
+        for discriminator_network_structure in DiscriminatorNetworkStructure:
+            pbar.set_description(f"{base_desc} (discriminator_network_structure={discriminator_network_structure})")
+            experiment_flow(
+                choose_30_images_method=TrainImagesSelectionMethod.FarthestImagesByPixelDistance,
+                train_settings=dict(
+                    train_epochs=40,
+                    optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001),
+                    generator_network_structure=NotImplemented,
+                    discriminator_network_structure=discriminator_network_structure
                 ),
                 experiment_random_seed=1,
                 create_kaggle_predictions_for_submission=False
@@ -884,7 +951,8 @@ def run_itay_to_delete_experiment():
         train_settings=dict(
             train_epochs=40,
             optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001),
-            generator_network_structure=GeneratorNetworkStructure.Thin
+            generator_network_structure=GeneratorNetworkStructure.Wide,
+            discriminator_network_structure=DiscriminatorNetworkStructure.ThinNetwork
         ),
         experiment_random_seed=1,
         create_kaggle_predictions_for_submission=True
@@ -897,6 +965,9 @@ if ExperimentsToRunConfig.CHOOSE_30_TRAIN_IMAGES_EXPERIMENT:
 
 if ExperimentsToRunConfig.GENERATOR_NETWORK_STRUCTURE_EXPERIMENT:
     run_generator_network_structure_experiment()
+
+if ExperimentsToRunConfig.DISCRIMINATOR_NETWORK_STRUCTURE_EXPERIMENT:
+    run_discriminator_network_structure_experiment()
 
 if ExperimentsToRunConfig.ITAY_TO_DELETE_EXPERIMENT:
     run_itay_to_delete_experiment()
