@@ -72,7 +72,7 @@ def choose_strongest_available_device_strategy():
     # todo itay - delete this section so it won't mess up in google colab
     gpu_is_available = any(tf.config.list_physical_devices('GPU'))
     if gpu_is_available:
-        !nvidia -smi
+        !nvidia-smi
 
     return selected_strategy
 
@@ -733,13 +733,27 @@ def experiment_flow(
         create_predictions_for_kaggle_submission(monet_generator, photo_dataset)
 
 
-
-experiment_flow(
-    choose_30_images_method='closest_images_by_earth_movers_distance',
-    train_settings=dict(
-        train_epochs=40,
-        optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001)
-    ),
-    experiment_random_seed=1,
-    create_kaggle_predictions_for_submission=True
+choose_30_images_methods = (
+    'random_selection',
+    'farthest_images_by_pixel_distance',
+    'closest_images_by_pixel_distance',
+    'farthest_images_by_structural_distance',
+    'closest_images_by_structural_distance',
+    'farthest_images_by_earth_movers_distance',
+    'closest_images_by_earth_movers_distance',
 )
+
+base_desc = 'choose_30_images_methods loop'
+with tqdm(total=len(choose_30_images_methods), desc=base_desc) as pbar:
+    for method in choose_30_images_methods:
+        pbar.set_description(f"{base_desc} (curr_method = '{method}')")
+        experiment_flow(
+            choose_30_images_method=method,
+            train_settings=dict(
+                train_epochs=40,
+                optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001)
+            ),
+            experiment_random_seed=1,
+            create_kaggle_predictions_for_submission=False
+        )
+        pbar.update()
