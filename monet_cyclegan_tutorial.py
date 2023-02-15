@@ -826,8 +826,8 @@ def experiment_flow(
 ##Experiment functions
 class ExperimentsToRunConfig:
     CHOOSE_30_TRAIN_IMAGES_EXPERIMENT = False
-    GENERATOR_NETWORK_STRUCTURE_EXPERIMENT = True
-    ITAY_TO_DELETE_EXPERIMENT = False
+    GENERATOR_NETWORK_STRUCTURE_EXPERIMENT = False
+    ITAY_TO_DELETE_EXPERIMENT = True
 
 
 def run_choose_30_train_images_experiment():
@@ -884,10 +884,10 @@ def run_itay_to_delete_experiment():
         train_settings=dict(
             train_epochs=40,
             optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001),
-            generator_network_structure=GeneratorNetworkStructure.Deep
+            generator_network_structure=GeneratorNetworkStructure.Thin
         ),
         experiment_random_seed=1,
-        create_kaggle_predictions_for_submission=False
+        create_kaggle_predictions_for_submission=True
     )
 
 
