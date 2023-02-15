@@ -75,8 +75,9 @@ def choose_strongest_available_device_strategy():
     if gpu_is_available:
         !nvidia-smi
 
-    print(f'\n\n*** running_on_tpu - {isinstance(DEVICE_STRATEGY, TPUStrategy)} ***\n\n')
+    print(f'\n\n*** running_on_tpu - {isinstance(selected_strategy, TPUStrategy)} ***\n\n')
     return selected_strategy
+
 
 
 DEVICE_STRATEGY = choose_strongest_available_device_strategy()
@@ -362,57 +363,106 @@ def up_sample(filters, size, strides=2, padding='same', apply_dropout=False):
     return network
 
 
-def build_generator_model():
+class GeneratorNetworkStructure(Enum):
+    Baseline = 'baseline'
+    Thin = 'thin'
+    Wide = 'wide'
+    Deep = 'deep'
+
+
+def build_generator_model(generator_network_structure: GeneratorNetworkStructure):
+    down_stack, up_stack = _build_generator_encoder_decoder_layout(generator_network_structure)
     inputs = layers.Input(shape=[320, 320, 3])
 
-    # bs = batch size
-    down_stack = [
-        down_sample(64, 4),  # (bs, 160, 160, 64)
-        down_sample(128, 4),  # (bs, 80, 80, 128)
-        down_sample(256, 4),  # (bs, 40, 40, 256)
-        down_sample(512, 4),  # (bs, 20, 20, 512)
-        down_sample(512, 4),  # (bs, 10, 10, 512)
-        down_sample(512, 4),  # (bs, 5, 5, 512)
-        down_sample(512, 4, strides=1, padding='valid'),  # (bs, 2, 2, 512)
-        down_sample(512, 4),  # (bs, 1, 1, 512)
-    ]
+    layers_to_direct_to_previous = []
+    x = inputs
+    for down in down_stack:
+        x = down(x)
+        layers_to_direct_to_previous.append(x)
 
-    up_stack = [
-        up_sample(512, 4, apply_dropout=True),  # (bs, 2, 2, 1024)
-        up_sample(512, 4, strides=1, padding='valid', apply_dropout=True),  # (bs, 5, 5, 1024)
-        up_sample(512, 4, apply_dropout=True),  # (bs, 10, 10, 1024)
-        up_sample(512, 4),  # (bs, 20, 20, 1024)
-        up_sample(256, 4),  # (bs, 40, 40, 512)
-        up_sample(128, 4),  # (bs, 80, 80, 256)
-        up_sample(64, 4),  # (bs, 160, 160, 128)
-    ]
+    for up, skip in zip(up_stack, reversed(layers_to_direct_to_previous[:-1])):
+        x = up(x)
+        x = layers.Concatenate()([x, skip])
 
-    initializer = tf.random_normal_initializer(0., 0.02)
-    last = layers.Conv2DTranspose(3, 4,
+    initializer = tf.random_normal_initializer(0.0, 0.02)
+    last_layer = layers.Conv2DTranspose(3, 4,
                                   strides=2,
                                   padding='same',
                                   kernel_initializer=initializer,
                                   activation='tanh')  # (bs, 320, 320, 3)
-
-    x = inputs
-
-    # Downsampling through the model
-    skips = []
-    for down in down_stack:
-        x = down(x)
-        skips.append(x)
-
-    skips = reversed(skips[:-1])
-
-    # Upsampling and establishing the skip connections
-    for up, skip in zip(up_stack, skips):
-        x = up(x)
-        x = layers.Concatenate()([x, skip])
-
-    x = last(x)
-
-    generator_model = keras.Model(inputs=inputs, outputs=x)
+    generator_model = keras.Model(inputs=inputs, outputs=last_layer(x))
     return generator_model
+
+
+def _build_generator_encoder_decoder_layout(network_structure: GeneratorNetworkStructure):
+    # todo itay delete dimensions comments
+
+    if network_structure is GeneratorNetworkStructure.Baseline:
+        # bs = batch size
+        down_stack = [
+            down_sample(64, 4),  # (bs, 160, 160, 64)
+            down_sample(128, 4),  # (bs, 80, 80, 128)
+            down_sample(256, 4),  # (bs, 40, 40, 256)
+            down_sample(512, 4),  # (bs, 20, 20, 512)
+            down_sample(512, 4),  # (bs, 10, 10, 512)
+            down_sample(512, 4),  # (bs, 5, 5, 512)
+            down_sample(512, 4, strides=1, padding='valid'),  # (bs, 2, 2, 512)
+            down_sample(512, 4),  # (bs, 1, 1, 512)
+        ]
+        up_stack = [
+            up_sample(512, 4, apply_dropout=True),  # (bs, 2, 2, 1024)
+            up_sample(512, 4, strides=1, padding='valid', apply_dropout=True),  # (bs, 5, 5, 1024)
+            up_sample(512, 4, apply_dropout=True),  # (bs, 10, 10, 1024)
+            up_sample(512, 4),  # (bs, 20, 20, 1024)
+            up_sample(256, 4),  # (bs, 40, 40, 512)
+            up_sample(128, 4),  # (bs, 80, 80, 256)
+            up_sample(64, 4),  # (bs, 160, 160, 128)
+        ]
+    elif network_structure is GeneratorNetworkStructure.Thin:
+        # bs = batch size
+        down_stack = [
+            down_sample(64, 4),  # (bs, 160, 160, 64)
+            down_sample(128, 4),  # (bs, 80, 80, 128)
+            down_sample(128, 4),  # (bs, 40, 40, 128)
+            down_sample(256, 4),  # (bs, 20, 20, 256)
+            down_sample(256, 4),  # (bs, 10, 10, 256)
+            down_sample(256, 4),  # (bs, 5, 5, 256)
+            down_sample(512, 4, strides=1, padding='valid'),  # (bs, 2, 2, 512)
+            down_sample(512, 4),  # (bs, 1, 1, 512)
+        ]
+        up_stack = [
+            up_sample(512, 4, apply_dropout=True),  # (bs, 2, 2, 1024)
+            up_sample(512, 4, strides=1, padding='valid', apply_dropout=True),  # (bs, 5, 5, 1024)
+            up_sample(256, 4, apply_dropout=True),  # (bs, 10, 10, 512)
+            up_sample(256, 4),  # (bs, 20, 20, 512)
+            up_sample(128, 4),  # (bs, 40, 40, 256)
+            up_sample(128, 4),  # (bs, 80, 80, 256)
+            up_sample(64, 4),  # (bs, 160, 160, 128)
+        ]
+    elif network_structure is GeneratorNetworkStructure.Wide:
+        # bs = batch size
+        down_stack = [
+            down_sample(64, 4),  # (bs, 160, 160, 64)
+            down_sample(256, 4),  # (bs, 80, 80, 256)
+            down_sample(512, 4),  # (bs, 40, 40, 512)
+            down_sample(1_024, 4),  # (bs, 20, 20, 1_024)
+            down_sample(1_024, 4),  # (bs, 10, 10, 1_024)
+            down_sample(1_024, 4),  # (bs, 5, 5, 1_024)
+            down_sample(1_024, 4, strides=1, padding='valid'),  # (bs, 2, 2, 1_024)
+            down_sample(512, 4),  # (bs, 1, 1, 512)
+        ]
+        up_stack = [
+            up_sample(1_024, 4, apply_dropout=True),  # (bs, 2, 2, 2048)
+            up_sample(1_024, 4, strides=1, padding='valid', apply_dropout=True),  # (bs, 5, 5, 2048)
+            up_sample(1_024, 4, apply_dropout=True),  # (bs, 10, 10, 2048)
+            up_sample(1_024, 4),  # (bs, 20, 20, 2048)
+            up_sample(512, 4),  # (bs, 40, 40, 1024)
+            up_sample(256, 4),  # (bs, 80, 80, 512)
+            up_sample(64, 4),  # (bs, 160, 160, 128)
+        ]
+    else:
+        raise NotImplementedError(f"unknown network structure - '{network_structure}'")
+    return down_stack, up_stack
 
 
 """# Build the discriminator
@@ -593,8 +643,9 @@ def _build_losses():
 
 
 def _build_cycle_gan_model(train_settings):
-    monet_generator = build_generator_model()
-    photo_generator = build_generator_model()
+    generator_network_structure = train_settings['generator_network_structure']
+    monet_generator = build_generator_model(generator_network_structure)
+    photo_generator = build_generator_model(generator_network_structure)
     monet_discriminator = build_discriminator_model()
     photo_discriminator = build_discriminator_model()
 
@@ -758,7 +809,8 @@ def run_choose_30_train_images_experiment():
                 choose_30_images_method=method,
                 train_settings=dict(
                     train_epochs=40,
-                    optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001)
+                    optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001),
+                    generator_network_structure=GeneratorNetworkStructure.Baseline
                 ),
                 experiment_random_seed=1,
                 create_kaggle_predictions_for_submission=False
@@ -771,15 +823,17 @@ def run_itay_to_delete_experiment():
         choose_30_images_method=TrainImagesSelectionMethod.FarthestImagesByPixelDistance,
         train_settings=dict(
             train_epochs=40,
-            optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001)
+            optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001),
+            generator_network_structure=GeneratorNetworkStructure.Wide
         ),
         experiment_random_seed=1,
-        create_kaggle_predictions_for_submission=True
+        create_kaggle_predictions_for_submission=False
     )
 
 
 ##Experiment execution
 if ExperimentsToRunConfig.CHOOSE_30_TRAIN_IMAGES_EXPERIMENT:
     run_choose_30_train_images_experiment()
+
 if ExperimentsToRunConfig.ITAY_TO_DELETE_EXPERIMENT:
     run_itay_to_delete_experiment()
