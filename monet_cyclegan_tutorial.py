@@ -193,7 +193,7 @@ def _plot_chosen_30_images(chosen_30_images_dataset):
     try:
         images_shape = list(chosen_30_images_dataset)[0].shape
         print(f'*** Selected 30 train monet photos (shape: {images_shape}) ***')
-        _, ax = plt.subplots(30, 1, figsize=(50, 50))
+        _, ax = plt.subplots(100, 1, figsize=(50, 50))
         for i, img in enumerate(chosen_30_images_dataset):
             img = (img * 127.5 + 127.5).numpy()[0].astype(np.uint8)
 
@@ -228,7 +228,9 @@ def _prepare_image_tensor_for_training(image):
     return image
 
 
-def load_tf_records_dataset(tf_record_files) -> Dataset:
+def load_tf_records_dataset(
+        tf_record_files, experiment_random_seed: int, add_random_augmentations: bool = False
+) -> Dataset:
     def _read_and_normalize_tfrecord(record):
         tfrecord_format = {
             "image_name": tf.io.FixedLenFeature([], tf.string),
@@ -238,12 +240,17 @@ def load_tf_records_dataset(tf_record_files) -> Dataset:
         record = tf.io.parse_single_example(record, tfrecord_format)
         image = record['image']
         image = tf.image.decode_jpeg(image, channels=3)
-        image = _prepare_image_tensor_for_training(image)
         return image
 
     sorted_tf_record_files = sorted(tf_record_files)
     dataset = tf.data.TFRecordDataset(sorted_tf_record_files)
     dataset = dataset.map(_read_and_normalize_tfrecord, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+
+    if add_random_augmentations:
+        augmentations_pipe = get_image_random_augmentations_pipe(experiment_random_seed)
+        dataset = dataset.map(augmentations_pipe, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+
+    dataset = dataset.map(_prepare_image_tensor_for_training, num_parallel_calls=tf.data.experimental.AUTOTUNE)
     return dataset
 
 
@@ -759,6 +766,22 @@ def _build_cycle_gan_model(train_settings):
     return cycle_gan_model, monet_generator
 
 
+#Add Image augmentations to train dataset
+def get_image_random_augmentations_pipe(random_seed: int):
+    augmentations_pipe = keras.Sequential([
+        layers.RandomFlip(
+            'horizontal_and_vertical', seed=random_seed
+        ),
+        layers.RandomZoom(
+            height_factor=(0.05, -0.15), width_factor=(0.05, -0.15), seed=random_seed
+        ),
+        layers.RandomRotation(
+            0.3, seed=random_seed
+        )
+    ])
+    return augmentations_pipe
+
+
 #Plotting utils
 def plot_cycle_gan_train_losses(train_history):
     epoch_level_train_history = {
@@ -850,19 +873,26 @@ def experiment_flow(
         choose_30_images_method: TrainImagesSelectionMethod,
         train_settings: dict,
         experiment_random_seed: int,
+        add_augmentations_to_train_dataset: bool = False,
         create_kaggle_predictions_for_submission: bool = False,
 ):
     set_training_random_seed(experiment_random_seed)
 
     monet_dataset_files, photo_dataset_files = find_competition_dataset_files(LOCAL_DATASET_FOLDER_PATH)
-    original_ordered_monet_dataset = load_tf_records_dataset(monet_dataset_files).batch(1)
-    photo_dataset = load_tf_records_dataset(photo_dataset_files).batch(1)
+    train_original_ordered_monet_dataset = load_tf_records_dataset(
+        monet_dataset_files, experiment_random_seed, add_random_augmentations=add_augmentations_to_train_dataset
+    ).batch(1)
+    train_photo_dataset = load_tf_records_dataset(
+        photo_dataset_files, experiment_random_seed, add_random_augmentations=add_augmentations_to_train_dataset
+    ).batch(1)
 
-    chosen_30_monet_dataset = _choose_30_monet_train_images(
-        original_ordered_monet_dataset, choose_30_images_method,
+    train_monet_dataset = _choose_30_monet_train_images(
+        train_original_ordered_monet_dataset, choose_30_images_method,
         experiment_random_seed, use_preprocessed_cache=True
     )
-    train_pairs_dataset = tf.data.Dataset.zip((chosen_30_monet_dataset, photo_dataset))
+    assert False, 'asfsafsafsafsa'
+
+    train_pairs_dataset = tf.data.Dataset.zip((train_monet_dataset, train_photo_dataset))
 
     with DEVICE_STRATEGY.scope():
         cycle_gan_model, monet_generator = _build_cycle_gan_model(train_settings)
@@ -873,10 +903,13 @@ def experiment_flow(
         verbose=2
     )
     plot_cycle_gan_train_losses(train_history)
-    plot_predictions_sample(monet_generator, photo_dataset)
 
+    inference_photo_dataset = load_tf_records_dataset(
+        photo_dataset_files, experiment_random_seed, add_random_augmentations=False
+    ).batch(1)
+    plot_predictions_sample(monet_generator, inference_photo_dataset)
     if create_kaggle_predictions_for_submission:
-        create_predictions_for_kaggle_submission(monet_generator, photo_dataset)
+        create_predictions_for_kaggle_submission(monet_generator, inference_photo_dataset)
 
 
 #Experiments
@@ -884,8 +917,8 @@ def experiment_flow(
 class ExperimentsToRunConfig:
     CHOOSE_30_TRAIN_IMAGES_EXPERIMENT = False
     GENERATOR_NETWORK_STRUCTURE_EXPERIMENT = False
-    DISCRIMINATOR_NETWORK_STRUCTURE_EXPERIMENT = True
-    ITAY_TO_DELETE_EXPERIMENT = False
+    DISCRIMINATOR_NETWORK_STRUCTURE_EXPERIMENT = False
+    ITAY_TO_DELETE_EXPERIMENT = True
 
 
 def run_choose_30_train_images_experiment():
@@ -955,7 +988,8 @@ def run_itay_to_delete_experiment():
             discriminator_network_structure=DiscriminatorNetworkStructure.Baseline
         ),
         experiment_random_seed=1,
-        create_kaggle_predictions_for_submission=True
+        add_augmentations_to_train_dataset=True,
+        create_kaggle_predictions_for_submission=False
     )
 
 
