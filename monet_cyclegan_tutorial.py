@@ -887,10 +887,10 @@ def experiment_flow(
         experiment_random_seed, use_preprocessed_cache=True
     )
 
-    train_selected_raw_monet_dataset, train_raw_photo_dataset = _handle_augmentations(
-        train_settings['augmentation_settings'], experiment_random_seed,
-        train_selected_raw_monet_dataset, train_raw_photo_dataset
-    )
+    # train_selected_raw_monet_dataset, train_raw_photo_dataset = _handle_augmentations(
+    #     train_settings['augmentation_settings'], experiment_random_seed,
+    #     train_selected_raw_monet_dataset, train_raw_photo_dataset
+    # )
 
     train_selected_monet_dataset = normalize_images_dataset_for_model(train_selected_raw_monet_dataset)
     train_photo_dataset = normalize_images_dataset_for_model(train_raw_photo_dataset)
@@ -1034,7 +1034,7 @@ def run_itay_to_delete_experiment():
         create_kaggle_predictions_for_submission=False
     )
 
-curr_version = 3
+curr_version = 4
 print(f'*** curr_version: {curr_version} ***')
 
 ##Experiment execution
