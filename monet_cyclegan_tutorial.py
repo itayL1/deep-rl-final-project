@@ -183,7 +183,7 @@ def _choose_30_monet_train_images(
             original_raw_ordered_monet_images[image_idx]
             for image_idx in chosen_30_images_indices
         ])
-        # _plot_chosen_30_images(chosen_30_raw_images_dataset)
+        _plot_chosen_30_images(chosen_30_raw_images_dataset)
     finally:
         set_training_random_seed(experiment_random_seed)
     return chosen_30_raw_images_dataset
@@ -261,7 +261,7 @@ def _pick_images_farthest_from_each_other(
     def _pre_comparison_transformation_func(image_tensor):
         image_array = image_tensor.numpy()
         resized_image = tf.image.resize(image_array, comparison_images_resize_shape).numpy()
-        resized_image = resized_image[0]
+        resized_image = resized_image
         return resized_image
 
     final_distance_func = distance_func
@@ -1021,7 +1021,7 @@ def run_itay_to_delete_experiment():
             discriminator_network_structure=DiscriminatorNetworkStructure.Baseline,
             augmentation_settings=dict(
                 monet_dataset=dict(
-                    enabled=True,
+                    enabled=False,
                     usage_each_image_n_times=10
                 ),
                 photo_dataset=dict(
@@ -1031,10 +1031,10 @@ def run_itay_to_delete_experiment():
             )
         ),
         experiment_random_seed=1,
-        create_kaggle_predictions_for_submission=True
+        create_kaggle_predictions_for_submission=False
     )
 
-curr_version = 1
+curr_version = 3
 print(f'*** curr_version: {curr_version} ***')
 
 ##Experiment execution
