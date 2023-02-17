@@ -114,13 +114,13 @@ class TrainImagesSelectionMethod(Enum):
 
 
 def _choose_30_monet_train_images(
-        original_ordered_monet_dataset: Dataset, method: TrainImagesSelectionMethod,
+        raw_ordered_monet_dataset: Dataset, method: TrainImagesSelectionMethod,
         experiment_random_seed: int, use_preprocessed_cache: bool
 ) -> Dataset:
     set_training_random_seed(seed=42)
 
     try:
-        original_ordered_monet_images = list(original_ordered_monet_dataset)
+        original_raw_ordered_monet_images = list(raw_ordered_monet_dataset)
         if use_preprocessed_cache:
             preprocessed_indices_cache = {
                 TrainImagesSelectionMethod.RandomSelection: [203, 266, 152, 9, 233, 226, 196, 109, 5, 175, 237, 57, 218, 45, 182, 221, 289, 211, 148, 165, 78, 113, 249, 250, 104, 42, 281, 295, 157, 238],
@@ -135,43 +135,43 @@ def _choose_30_monet_train_images(
             chosen_30_images_indices = preprocessed_indices_cache[method]
         elif method is TrainImagesSelectionMethod.RandomSelection:
             chosen_30_images_indices = _pick_random_images(
-                original_ordered_monet_images, images_count=30
+                original_raw_ordered_monet_images, images_count=30
             )
         elif method is TrainImagesSelectionMethod.FarthestImagesByPixelDistance:
             chosen_30_images_indices = _pick_images_farthest_from_each_other(
-                original_ordered_monet_images,
+                original_raw_ordered_monet_images,
                 distance_func=_images_pixel_distance,
                 images_count=30
             )
         elif method is TrainImagesSelectionMethod.ClosestImagesByPixelDistance:
             chosen_30_images_indices = _pick_images_farthest_from_each_other(
-                original_ordered_monet_images,
+                original_raw_ordered_monet_images,
                 distance_func=_images_pixel_distance,
                 images_count=30,
                 reverse_distance=True
             )
         elif method is TrainImagesSelectionMethod.FarthestImagesByStructuralDistance:
             chosen_30_images_indices = _pick_images_farthest_from_each_other(
-                original_ordered_monet_images,
+                original_raw_ordered_monet_images,
                 distance_func=_images_structural_distance,
                 images_count=30
             )
         elif method is TrainImagesSelectionMethod.ClosestImagesByStructuralDistance:
             chosen_30_images_indices = _pick_images_farthest_from_each_other(
-                original_ordered_monet_images,
+                original_raw_ordered_monet_images,
                 distance_func=_images_structural_distance,
                 images_count=30,
                 reverse_distance=True
             )
         elif method is TrainImagesSelectionMethod.FarthestImagesByEarthMoversDistance:
             chosen_30_images_indices = _pick_images_farthest_from_each_other(
-                original_ordered_monet_images,
+                original_raw_ordered_monet_images,
                 distance_func=_earth_movers_distance,
                 images_count=30
             )
         elif method is TrainImagesSelectionMethod.ClosestImagesByEarthMoversDistance:
             chosen_30_images_indices = _pick_images_farthest_from_each_other(
-                original_ordered_monet_images,
+                original_raw_ordered_monet_images,
                 distance_func=_earth_movers_distance,
                 images_count=30,
                 reverse_distance=True
@@ -179,24 +179,23 @@ def _choose_30_monet_train_images(
         else:
             raise NotImplementedError(f"unknown method - '{method}'")
 
-        chosen_30_images_dataset = Dataset.from_tensor_slices([
-            original_ordered_monet_images[image_idx]
+        chosen_30_raw_images_dataset = Dataset.from_tensor_slices([
+            original_raw_ordered_monet_images[image_idx]
             for image_idx in chosen_30_images_indices
         ])
-        _plot_chosen_30_images(chosen_30_images_dataset)
+        # _plot_chosen_30_images(chosen_30_raw_images_dataset)
     finally:
         set_training_random_seed(experiment_random_seed)
-    return chosen_30_images_dataset
+    return chosen_30_raw_images_dataset
 
 
-def _plot_chosen_30_images(chosen_30_images_dataset):
+def _plot_chosen_30_images(chosen_30_raw_images_dataset):
     try:
-        images_shape = list(chosen_30_images_dataset)[0].shape
+        images_shape = list(chosen_30_raw_images_dataset)[0].shape
         print(f'*** Selected 30 train monet photos (shape: {images_shape}) ***')
-        _, ax = plt.subplots(100, 1, figsize=(50, 50))
-        for i, img in enumerate(chosen_30_images_dataset):
-            img = (img * 127.5 + 127.5).numpy()[0].astype(np.uint8)
-
+        _, ax = plt.subplots(30, 1, figsize=(50, 50))
+        for i, img in enumerate(chosen_30_raw_images_dataset):
+            # img = (img * 127.5 + 127.5).numpy()[0].astype(np.uint8)
             ax[i].imshow(img)
         plt.show()
     finally:
@@ -221,16 +220,21 @@ def find_competition_dataset_files(local_dataset_folder_path: Path):
     return monet_dataset_files, photo_dataset_files
 
 
-def _prepare_image_tensor_for_training(image):
-    image = (tf.cast(image, tf.float32) / 127.5) - 1
-    image = tf.reshape(image, [256, 256, 3])
-    image = tf.image.resize(image, (320, 320), method='bilinear')
-    return image
+def normalize_images_dataset_for_model(images_dataset: Dataset, batch_size: int = 1) -> Dataset:
+    def _prepare_image_tensor_for_training(image):
+        image = (tf.cast(image, tf.float32) / 127.5) - 1
+        image = tf.reshape(image, [256, 256, 3])
+        image = tf.image.resize(image, (320, 320), method='bilinear')
+        return image
+
+    images_dataset = images_dataset.map(
+        _prepare_image_tensor_for_training, num_parallel_calls=tf.data.experimental.AUTOTUNE
+    ).batch(batch_size)
+    return images_dataset
 
 
-def load_tf_records_dataset(
-        tf_record_files, experiment_random_seed: int, add_random_augmentations: bool = False
-) -> Dataset:
+
+def load_tf_records_raw_dataset(tf_record_files) -> Dataset:
     def _read_and_normalize_tfrecord(record):
         tfrecord_format = {
             "image_name": tf.io.FixedLenFeature([], tf.string),
@@ -243,15 +247,9 @@ def load_tf_records_dataset(
         return image
 
     sorted_tf_record_files = sorted(tf_record_files)
-    dataset = tf.data.TFRecordDataset(sorted_tf_record_files)
-    dataset = dataset.map(_read_and_normalize_tfrecord, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-
-    if add_random_augmentations:
-        augmentations_pipe = get_image_random_augmentations_pipe(experiment_random_seed)
-        dataset = dataset.map(augmentations_pipe, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-
-    dataset = dataset.map(_prepare_image_tensor_for_training, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-    return dataset
+    raw_dataset = tf.data.TFRecordDataset(sorted_tf_record_files)
+    raw_dataset = raw_dataset.map(_read_and_normalize_tfrecord, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    return raw_dataset
 
 
 ##Pick 30 train monet images strategies
@@ -262,9 +260,7 @@ def _pick_images_farthest_from_each_other(
 
     def _pre_comparison_transformation_func(image_tensor):
         image_array = image_tensor.numpy()
-        denormalized_image = (image_array * 127.5 + 127.5)
-        resized_image = tf.image.resize(denormalized_image, comparison_images_resize_shape).numpy()
-        resized_image = resized_image.astype(np.uint8)
+        resized_image = tf.image.resize(image_array, comparison_images_resize_shape).numpy()
         resized_image = resized_image[0]
         return resized_image
 
@@ -767,19 +763,24 @@ def _build_cycle_gan_model(train_settings):
 
 
 #Add Image augmentations to train dataset
-def get_image_random_augmentations_pipe(random_seed: int):
+def add_random_augmentations(
+        raw_images_dataset: Dataset, random_seed: int, usage_each_image_n_times: int
+) -> Dataset:
     augmentations_pipe = keras.Sequential([
         layers.RandomFlip(
             'horizontal_and_vertical', seed=random_seed
         ),
         layers.RandomZoom(
-            height_factor=(0.05, -0.15), width_factor=(0.05, -0.15), seed=random_seed
+            height_factor=(0, -0.15), width_factor=(0, -0.15), seed=random_seed
         ),
         layers.RandomRotation(
             0.3, seed=random_seed
         )
     ])
-    return augmentations_pipe
+    images_dataset_with_augmentations = raw_images_dataset.map(
+        augmentations_pipe, num_parallel_calls=tf.data.experimental.AUTOTUNE
+    ).repeat(usage_each_image_n_times)
+    return images_dataset_with_augmentations
 
 
 #Plotting utils
@@ -873,26 +874,28 @@ def experiment_flow(
         choose_30_images_method: TrainImagesSelectionMethod,
         train_settings: dict,
         experiment_random_seed: int,
-        add_augmentations_to_train_dataset: bool = False,
         create_kaggle_predictions_for_submission: bool = False,
 ):
     set_training_random_seed(experiment_random_seed)
 
     monet_dataset_files, photo_dataset_files = find_competition_dataset_files(LOCAL_DATASET_FOLDER_PATH)
-    train_original_ordered_monet_dataset = load_tf_records_dataset(
-        monet_dataset_files, experiment_random_seed, add_random_augmentations=add_augmentations_to_train_dataset
-    ).batch(1)
-    train_photo_dataset = load_tf_records_dataset(
-        photo_dataset_files, experiment_random_seed, add_random_augmentations=add_augmentations_to_train_dataset
-    ).batch(1)
+    train_raw_ordered_monet_dataset = load_tf_records_raw_dataset(monet_dataset_files)
+    train_raw_photo_dataset = load_tf_records_raw_dataset(photo_dataset_files)
 
-    train_monet_dataset = _choose_30_monet_train_images(
-        train_original_ordered_monet_dataset, choose_30_images_method,
+    train_selected_raw_monet_dataset = _choose_30_monet_train_images(
+        train_raw_ordered_monet_dataset, choose_30_images_method,
         experiment_random_seed, use_preprocessed_cache=True
     )
-    assert False, 'asfsafsafsafsa'
 
-    train_pairs_dataset = tf.data.Dataset.zip((train_monet_dataset, train_photo_dataset))
+    train_selected_raw_monet_dataset, train_raw_photo_dataset = _handle_augmentations(
+        train_settings['augmentation_settings'], experiment_random_seed,
+        train_selected_raw_monet_dataset, train_raw_photo_dataset
+    )
+
+    train_selected_monet_dataset = normalize_images_dataset_for_model(train_selected_raw_monet_dataset)
+    train_photo_dataset = normalize_images_dataset_for_model(train_raw_photo_dataset)
+
+    train_pairs_dataset = tf.data.Dataset.zip((train_selected_monet_dataset, train_photo_dataset))
 
     with DEVICE_STRATEGY.scope():
         cycle_gan_model, monet_generator = _build_cycle_gan_model(train_settings)
@@ -904,12 +907,30 @@ def experiment_flow(
     )
     plot_cycle_gan_train_losses(train_history)
 
-    inference_photo_dataset = load_tf_records_dataset(
-        photo_dataset_files, experiment_random_seed, add_random_augmentations=False
-    ).batch(1)
+    inference_raw_photo_dataset = load_tf_records_raw_dataset(photo_dataset_files)
+    inference_photo_dataset = normalize_images_dataset_for_model(inference_raw_photo_dataset)
     plot_predictions_sample(monet_generator, inference_photo_dataset)
     if create_kaggle_predictions_for_submission:
         create_predictions_for_kaggle_submission(monet_generator, inference_photo_dataset)
+
+
+def _handle_augmentations(
+        augmentation_settings: dict, experiment_random_seed: int,
+        train_selected_raw_monet_dataset: Dataset, train_raw_photo_dataset: Dataset
+):
+    if augmentation_settings['monet_dataset']['enabled']:
+        train_selected_raw_monet_dataset = add_random_augmentations(
+            train_selected_raw_monet_dataset, experiment_random_seed,
+            usage_each_image_n_times=augmentation_settings['monet_dataset'].get('usage_each_image_n_times', 1)
+        )
+
+    if augmentation_settings['photo_dataset']['enabled']:
+        train_raw_photo_dataset = add_random_augmentations(
+            train_raw_photo_dataset, experiment_random_seed,
+            usage_each_image_n_times=augmentation_settings['photo_dataset'].get('usage_each_image_n_times', 1)
+        )
+
+    return train_selected_raw_monet_dataset, train_raw_photo_dataset
 
 
 #Experiments
@@ -932,7 +953,11 @@ def run_choose_30_train_images_experiment():
                     train_epochs=40,
                     optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001),
                     generator_network_structure=GeneratorNetworkStructure.Baseline,
-                    discriminator_network_structure=DiscriminatorNetworkStructure.Baseline
+                    discriminator_network_structure=DiscriminatorNetworkStructure.Baseline,
+                    augmentation_settings=dict(
+                        monet_dataset=dict(enabled=False),
+                        photo_dataset=dict(enabled=False),
+                    )
                 ),
                 experiment_random_seed=1,
                 create_kaggle_predictions_for_submission=False
@@ -951,7 +976,11 @@ def run_generator_network_structure_experiment():
                     train_epochs=40,
                     optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001),
                     generator_network_structure=generator_network_structure,
-                    discriminator_network_structure=DiscriminatorNetworkStructure.Baseline
+                    discriminator_network_structure=DiscriminatorNetworkStructure.Baseline,
+                    augmentation_settings=dict(
+                        monet_dataset=dict(enabled=False),
+                        photo_dataset=dict(enabled=False),
+                    )
                 ),
                 experiment_random_seed=1,
                 create_kaggle_predictions_for_submission=False
@@ -970,7 +999,11 @@ def run_discriminator_network_structure_experiment():
                     train_epochs=40,
                     optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001),
                     generator_network_structure=GeneratorNetworkStructure.Thin,
-                    discriminator_network_structure=discriminator_network_structure
+                    discriminator_network_structure=discriminator_network_structure,
+                    augmentation_settings=dict(
+                        monet_dataset=dict(enabled=False),
+                        photo_dataset=dict(enabled=False),
+                    )
                 ),
                 experiment_random_seed=1,
                 create_kaggle_predictions_for_submission=False
@@ -985,13 +1018,24 @@ def run_itay_to_delete_experiment():
             train_epochs=40,
             optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001),
             generator_network_structure=GeneratorNetworkStructure.Thin,
-            discriminator_network_structure=DiscriminatorNetworkStructure.Baseline
+            discriminator_network_structure=DiscriminatorNetworkStructure.Baseline,
+            augmentation_settings=dict(
+                monet_dataset=dict(
+                    enabled=True,
+                    usage_each_image_n_times=10
+                ),
+                photo_dataset=dict(
+                    enabled=False,
+                    usage_each_image_n_times=1
+                ),
+            )
         ),
         experiment_random_seed=1,
-        add_augmentations_to_train_dataset=True,
-        create_kaggle_predictions_for_submission=False
+        create_kaggle_predictions_for_submission=True
     )
 
+curr_version = 1
+print(f'*** curr_version: {curr_version} ***')
 
 ##Experiment execution
 if ExperimentsToRunConfig.CHOOSE_30_TRAIN_IMAGES_EXPERIMENT:
