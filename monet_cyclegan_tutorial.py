@@ -887,10 +887,10 @@ def experiment_flow(
         experiment_random_seed, use_preprocessed_cache=True
     )
 
-    # train_selected_raw_monet_dataset, train_raw_photo_dataset = _handle_augmentations(
-    #     train_settings['augmentation_settings'], experiment_random_seed,
-    #     train_selected_raw_monet_dataset, train_raw_photo_dataset
-    # )
+    train_selected_raw_monet_dataset, train_raw_photo_dataset = _handle_augmentations(
+        train_settings['augmentation_settings'], experiment_random_seed,
+        train_selected_raw_monet_dataset, train_raw_photo_dataset
+    )
 
     train_selected_monet_dataset = normalize_images_dataset_for_model(train_selected_raw_monet_dataset)
     train_photo_dataset = normalize_images_dataset_for_model(train_raw_photo_dataset)
@@ -939,6 +939,7 @@ class ExperimentsToRunConfig:
     CHOOSE_30_TRAIN_IMAGES_EXPERIMENT = False
     GENERATOR_NETWORK_STRUCTURE_EXPERIMENT = False
     DISCRIMINATOR_NETWORK_STRUCTURE_EXPERIMENT = False
+    TRAIN_IMAGES_AUGEMNTATION_EXPERIMENT = False
     ITAY_TO_DELETE_EXPERIMENT = True
 
 
@@ -1011,6 +1012,73 @@ def run_discriminator_network_structure_experiment():
             pbar.update()
 
 
+def run_train_images_augemntation_experiment():
+    experiment_augmentation_settings_list = [
+        dict(
+            monet_dataset=dict(enabled=False),
+            photo_dataset=dict(enabled=False),
+        ),
+        dict(
+            monet_dataset=dict(
+                enabled=True,
+                usage_each_image_n_times=10
+            ),
+            photo_dataset=dict(
+                enabled=False,
+                usage_each_image_n_times=1
+            ),
+        ),
+        dict(
+            monet_dataset=dict(
+                enabled=False,
+                usage_each_image_n_times=10
+            ),
+            photo_dataset=dict(
+                enabled=True,
+                usage_each_image_n_times=1
+            ),
+        ),
+        dict(
+            monet_dataset=dict(
+                enabled=True,
+                usage_each_image_n_times=10
+            ),
+            photo_dataset=dict(
+                enabled=True,
+                usage_each_image_n_times=1
+            ),
+        ),
+        dict(
+            monet_dataset=dict(
+                enabled=True,
+                usage_each_image_n_times=20
+            ),
+            photo_dataset=dict(
+                enabled=True,
+                usage_each_image_n_times=1
+            ),
+        ),
+    ]
+
+    base_desc = 'run_train_images_augemntation_experiment loop'
+    with tqdm(total=len(experiment_augmentation_settings_list), desc=base_desc) as pbar:
+        for augmentation_settings in experiment_augmentation_settings_list:
+            pbar.set_description(f"{base_desc} (augmentation_settings={augmentation_settings})")
+            experiment_flow(
+                choose_30_images_method=TrainImagesSelectionMethod.FarthestImagesByPixelDistance,
+                train_settings=dict(
+                    train_epochs=40,
+                    optimizer_builder=lambda: tf.keras.optimizers.Adam(learning_rate=0.001, decay=0.001),
+                    generator_network_structure=GeneratorNetworkStructure.Thin,
+                    discriminator_network_structure=DiscriminatorNetworkStructure.Baseline,
+                    augmentation_settings=augmentation_settings
+                ),
+                experiment_random_seed=1,
+                create_kaggle_predictions_for_submission=True
+            )
+            pbar.update()
+
+
 def run_itay_to_delete_experiment():
     experiment_flow(
         choose_30_images_method=TrainImagesSelectionMethod.FarthestImagesByPixelDistance,
@@ -1021,20 +1089,20 @@ def run_itay_to_delete_experiment():
             discriminator_network_structure=DiscriminatorNetworkStructure.Baseline,
             augmentation_settings=dict(
                 monet_dataset=dict(
-                    enabled=False,
-                    usage_each_image_n_times=10
+                    enabled=True,
+                    usage_each_image_n_times=20
                 ),
                 photo_dataset=dict(
-                    enabled=False,
+                    enabled=True,
                     usage_each_image_n_times=1
                 ),
             )
         ),
         experiment_random_seed=1,
-        create_kaggle_predictions_for_submission=False
+        create_kaggle_predictions_for_submission=True
     )
 
-curr_version = 4
+curr_version = 15
 print(f'*** curr_version: {curr_version} ***')
 
 ##Experiment execution
@@ -1046,6 +1114,9 @@ if ExperimentsToRunConfig.GENERATOR_NETWORK_STRUCTURE_EXPERIMENT:
 
 if ExperimentsToRunConfig.DISCRIMINATOR_NETWORK_STRUCTURE_EXPERIMENT:
     run_discriminator_network_structure_experiment()
+
+if ExperimentsToRunConfig.TRAIN_IMAGES_AUGEMNTATION_EXPERIMENT:
+    run_train_images_augemntation_experiment()
 
 if ExperimentsToRunConfig.ITAY_TO_DELETE_EXPERIMENT:
     run_itay_to_delete_experiment()
