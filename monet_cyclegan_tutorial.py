@@ -578,7 +578,7 @@ def _build_patch_discriminator_conv_layers_layout(network_structure: Discriminat
 
 
 ##Build cycle gan model
-class CycleGan(keras.Model):
+class CycleGanModel(keras.Model):
     def __init__(
             self,
             monet_generator,
@@ -587,12 +587,12 @@ class CycleGan(keras.Model):
             photo_discriminator,
             lambda_cycle,
     ):
-        super(CycleGan, self).__init__()
+        super(CycleGanModel, self).__init__()
         self._monet_generator = monet_generator
         self._photo_generator = photo_generator
         self._monet_discriminator = monet_discriminator
         self._photo_discriminator = photo_discriminator
-        self.lambda_cycle = lambda_cycle
+        self._lambda_cycle = lambda_cycle
 
     def compile(
             self,
@@ -605,7 +605,7 @@ class CycleGan(keras.Model):
             cycle_loss_fn,
             identity_loss_fn
     ):
-        super(CycleGan, self).compile()
+        super(CycleGanModel, self).compile()
         self.m_gen_optimizer = m_gen_optimizer
         self.p_gen_optimizer = p_gen_optimizer
         self.m_disc_optimizer = m_disc_optimizer
@@ -632,6 +632,15 @@ class CycleGan(keras.Model):
         }
         return ret_losses
 
+    def store_models(self, storage_folder_path: Path):
+        assert storage_folder_path.exists(), \
+            f"expected the output folder to exist on the disk - '{storage_folder_path}'"
+
+        self._monet_generator.save_weights(storage_folder_path / 'monet_generator.ckpt')
+        self._photo_generator.save_weights(storage_folder_path / 'photo_generator.ckpt')
+        self._monet_discriminator.save_weights(storage_folder_path / 'monet_discriminator.ckpt')
+        self._photo_discriminator.save_weights(storage_folder_path / 'photo_discriminator.ckpt')
+
     def _calc_internal_models_losses(self, real_monet, real_photo):
         fake_monet = self._monet_generator(real_photo, training=True)
         cycled_photo = self._photo_generator(fake_monet, training=True)
@@ -651,13 +660,13 @@ class CycleGan(keras.Model):
         monet_gen_loss = self.gen_loss_fn(disc_fake_monet)
         photo_gen_loss = self.gen_loss_fn(disc_fake_photo)
 
-        total_cycle_loss = self.cycle_loss_fn(real_monet, cycled_monet, self.lambda_cycle) + \
-                           self.cycle_loss_fn(real_photo, cycled_photo, self.lambda_cycle)
+        total_cycle_loss = self.cycle_loss_fn(real_monet, cycled_monet, self._lambda_cycle) + \
+                           self.cycle_loss_fn(real_photo, cycled_photo, self._lambda_cycle)
 
         final_monet_gen_loss = monet_gen_loss + total_cycle_loss + \
-                               self.identity_loss_fn(real_monet, same_monet, self.lambda_cycle)
+                               self.identity_loss_fn(real_monet, same_monet, self._lambda_cycle)
         final_photo_gen_loss = photo_gen_loss + total_cycle_loss + \
-                               self.identity_loss_fn(real_photo, same_photo, self.lambda_cycle)
+                               self.identity_loss_fn(real_photo, same_photo, self._lambda_cycle)
 
         final_monet_disc_loss = self.disc_loss_fn(disc_real_monet, disc_fake_monet)
         final_photo_disc_loss = self.disc_loss_fn(disc_real_photo, disc_fake_photo)
@@ -726,7 +735,7 @@ def construct_cycle_gan_model(train_settings):
     monet_discriminator_optimizer = optimizer_builder()
     photo_discriminator_optimizer = optimizer_builder()
 
-    cycle_gan_model = CycleGan(
+    cycle_gan_model = CycleGanModel(
         monet_generator, photo_generator, monet_discriminator, photo_discriminator, lambda_cycle=10
     )
     cycle_gan_model.compile(
@@ -886,6 +895,11 @@ def cycle_gan_experiment_flow(
     inference_raw_photo_dataset = load_tf_records_raw_dataset(photo_dataset_files)
     inference_photo_dataset = normalize_images_dataset_for_model(inference_raw_photo_dataset)
     plot_predictions_sample(monet_generator, inference_photo_dataset)
+
+    _store_experiment_model(
+        cycle_gan_model, choose_30_images_method=choose_30_images_method,
+        train_settings=train_settings, experiment_random_seed=experiment_random_seed
+    )
     if create_kaggle_predictions_for_submission:
         create_predictions_for_kaggle_submission(monet_generator, inference_photo_dataset)
 
@@ -907,6 +921,16 @@ def _handle_experiment_augmentations(
         )
 
     return train_selected_raw_monet_dataset, train_raw_photo_dataset
+
+
+def _store_experiment_model(model: CycleGanModel, **experiment_settings):
+    now_time_str = datetime.now().strftime('%y_%m_%d__%H_%M_%S')
+    experiment_output_folder = Path(f'./experiment_outputs/{now_time_str}')
+    experiment_output_folder.mkdir(parents=True, exist_ok=True)
+
+    with open(experiment_output_folder / 'experiment_settings.txt', 'w') as experiment_settings_file:
+        experiment_settings_file.write(str(experiment_settings))
+    model.store_models(experiment_output_folder)
 
 
 #Experiments execution
