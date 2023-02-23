@@ -47,6 +47,9 @@ def set_tf_deterministic_mode():
     os.environ['TF_CUDNN_DETERMINISTIC'] = '1'
 
 
+set_tf_deterministic_mode()
+
+
 ##Set random seed
 def set_training_random_seed(seed: int):
     random.seed(seed)
@@ -55,8 +58,6 @@ def set_training_random_seed(seed: int):
     os.environ['PYTHONHASHSEED'] = str(seed)
     print(f'set_training_random_seed() - seed value: {seed}')
 
-
-set_tf_deterministic_mode()
 
 ##Connect to strongest available device
 def choose_strongest_available_device_strategy():
@@ -98,6 +99,55 @@ def download_competition_dataset_if_not_present():
 
 
 download_competition_dataset_if_not_present()
+
+# Load and normalize competition dataset
+
+def find_competition_dataset_files(local_dataset_folder_path: Path):
+    if isinstance(DEVICE_STRATEGY, TPUStrategy):
+        from kaggle_datasets import KaggleDatasets
+        dataset_folder_path = Path(KaggleDatasets().get_gcs_path())
+    else:
+        dataset_folder_path = local_dataset_folder_path
+
+    monet_dataset_files = tf.io.gfile.glob(str(dataset_folder_path / 'monet_tfrec/*.tfrec'))
+    photo_dataset_files = tf.io.gfile.glob(str(dataset_folder_path / 'photo_tfrec/*.tfrec'))
+    assert any(monet_dataset_files)
+    assert any(photo_dataset_files)
+    print(f"found {len(monet_dataset_files)} monet and {len(photo_dataset_files)} photo tfrec files.")
+
+    return monet_dataset_files, photo_dataset_files
+
+
+def load_tf_records_raw_dataset(tf_record_files) -> Dataset:
+    def _read_and_normalize_tfrecord(record):
+        tfrecord_format = {
+            "image_name": tf.io.FixedLenFeature([], tf.string),
+            "image": tf.io.FixedLenFeature([], tf.string),
+            "target": tf.io.FixedLenFeature([], tf.string)
+        }
+        record = tf.io.parse_single_example(record, tfrecord_format)
+        image = record['image']
+        image = tf.image.decode_jpeg(image, channels=3)
+        return image
+
+    sorted_tf_record_files = sorted(tf_record_files)
+    raw_dataset = tf.data.TFRecordDataset(sorted_tf_record_files)
+    raw_dataset = raw_dataset.map(_read_and_normalize_tfrecord, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    return raw_dataset
+
+
+def normalize_images_dataset_for_model(images_dataset: Dataset, batch_size: int = 1) -> Dataset:
+    def _prepare_image_tensor_for_training(image):
+        image = (tf.cast(image, tf.float32) / 127.5) - 1
+        image = tf.reshape(image, [256, 256, 3])
+        image = tf.image.resize(image, (320, 320), method='bilinear')
+        return image
+
+    images_dataset = images_dataset.map(
+        _prepare_image_tensor_for_training, num_parallel_calls=tf.data.experimental.AUTOTUNE
+    ).batch(batch_size)
+    return images_dataset
+
 
 #Choose 30 monet train images
 
@@ -204,56 +254,6 @@ def _plot_chosen_30_images(chosen_30_raw_images_dataset):
         plt.close()
 
 
-# Load competition dataset
-##Load full dataset
-def find_competition_dataset_files(local_dataset_folder_path: Path):
-    if isinstance(DEVICE_STRATEGY, TPUStrategy):
-        from kaggle_datasets import KaggleDatasets
-        dataset_folder_path = Path(KaggleDatasets().get_gcs_path())
-    else:
-        dataset_folder_path = local_dataset_folder_path
-
-    monet_dataset_files = tf.io.gfile.glob(str(dataset_folder_path / 'monet_tfrec/*.tfrec'))
-    photo_dataset_files = tf.io.gfile.glob(str(dataset_folder_path / 'photo_tfrec/*.tfrec'))
-    assert any(monet_dataset_files)
-    assert any(photo_dataset_files)
-    print(f"found {len(monet_dataset_files)} monet and {len(photo_dataset_files)} photo tfrec files.")
-
-    return monet_dataset_files, photo_dataset_files
-
-
-def normalize_images_dataset_for_model(images_dataset: Dataset, batch_size: int = 1) -> Dataset:
-    def _prepare_image_tensor_for_training(image):
-        image = (tf.cast(image, tf.float32) / 127.5) - 1
-        image = tf.reshape(image, [256, 256, 3])
-        image = tf.image.resize(image, (320, 320), method='bilinear')
-        return image
-
-    images_dataset = images_dataset.map(
-        _prepare_image_tensor_for_training, num_parallel_calls=tf.data.experimental.AUTOTUNE
-    ).batch(batch_size)
-    return images_dataset
-
-
-
-def load_tf_records_raw_dataset(tf_record_files) -> Dataset:
-    def _read_and_normalize_tfrecord(record):
-        tfrecord_format = {
-            "image_name": tf.io.FixedLenFeature([], tf.string),
-            "image": tf.io.FixedLenFeature([], tf.string),
-            "target": tf.io.FixedLenFeature([], tf.string)
-        }
-        record = tf.io.parse_single_example(record, tfrecord_format)
-        image = record['image']
-        image = tf.image.decode_jpeg(image, channels=3)
-        return image
-
-    sorted_tf_record_files = sorted(tf_record_files)
-    raw_dataset = tf.data.TFRecordDataset(sorted_tf_record_files)
-    raw_dataset = raw_dataset.map(_read_and_normalize_tfrecord, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-    return raw_dataset
-
-
 ##Pick images strategies
 
 ###This is based on the image distance methods implementation in this post -
@@ -347,7 +347,7 @@ def _calc_image_greyscale_histogram(image: np.array) -> np.array:
     return np.array(hist) / (h * w)
 
 
-#Cycle gan model implementation
+#Cycle gan model implementation (with patch discriminator)
 ##Architecture definitions
 class GeneratorNetworkStructure(Enum):
     Baseline = 'baseline'
@@ -365,7 +365,7 @@ class DiscriminatorNetworkStructure(Enum):
 
 
 ##Utils
-def down_sample_layer(filters, size, strides=2, padding='same'):
+def _down_sample_layer(filters, size, strides=2, padding='same'):
     initializer = tf.random_normal_initializer(0., 0.02)
 
     network = keras.Sequential()
@@ -417,14 +417,14 @@ def build_generator_model(generator_network_structure: GeneratorNetworkStructure
 def _build_generator_encoder_decoder_layout(network_structure: GeneratorNetworkStructure):
     if network_structure is GeneratorNetworkStructure.Baseline:
         down_stack = [
-            down_sample_layer(64, 4),
-            down_sample_layer(128, 4),
-            down_sample_layer(256, 4),
-            down_sample_layer(512, 4),
-            down_sample_layer(512, 4),
-            down_sample_layer(512, 4),
-            down_sample_layer(512, 4, strides=1, padding='valid'),
-            down_sample_layer(512, 4),
+            _down_sample_layer(64, 4),
+            _down_sample_layer(128, 4),
+            _down_sample_layer(256, 4),
+            _down_sample_layer(512, 4),
+            _down_sample_layer(512, 4),
+            _down_sample_layer(512, 4),
+            _down_sample_layer(512, 4, strides=1, padding='valid'),
+            _down_sample_layer(512, 4),
         ]
         up_stack = [
             _up_sample_layer(512, 4, apply_dropout=True),
@@ -437,14 +437,14 @@ def _build_generator_encoder_decoder_layout(network_structure: GeneratorNetworkS
         ]
     elif network_structure is GeneratorNetworkStructure.Thin:
         down_stack = [
-            down_sample_layer(64, 4),
-            down_sample_layer(128, 4),
-            down_sample_layer(128, 4),
-            down_sample_layer(256, 4),
-            down_sample_layer(256, 4),
-            down_sample_layer(256, 4),
-            down_sample_layer(512, 4, strides=1, padding='valid'),
-            down_sample_layer(512, 4),
+            _down_sample_layer(64, 4),
+            _down_sample_layer(128, 4),
+            _down_sample_layer(128, 4),
+            _down_sample_layer(256, 4),
+            _down_sample_layer(256, 4),
+            _down_sample_layer(256, 4),
+            _down_sample_layer(512, 4, strides=1, padding='valid'),
+            _down_sample_layer(512, 4),
         ]
         up_stack = [
             _up_sample_layer(512, 4, apply_dropout=True),
@@ -457,14 +457,14 @@ def _build_generator_encoder_decoder_layout(network_structure: GeneratorNetworkS
         ]
     elif network_structure is GeneratorNetworkStructure.Wide:
         down_stack = [
-            down_sample_layer(64, 4),
-            down_sample_layer(256, 4),
-            down_sample_layer(512, 4),
-            down_sample_layer(1_024, 4),
-            down_sample_layer(1_024, 4),
-            down_sample_layer(1_024, 4),
-            down_sample_layer(1_024, 4, strides=1, padding='valid'),
-            down_sample_layer(512, 4),
+            _down_sample_layer(64, 4),
+            _down_sample_layer(256, 4),
+            _down_sample_layer(512, 4),
+            _down_sample_layer(1_024, 4),
+            _down_sample_layer(1_024, 4),
+            _down_sample_layer(1_024, 4),
+            _down_sample_layer(1_024, 4, strides=1, padding='valid'),
+            _down_sample_layer(512, 4),
         ]
         up_stack = [
             _up_sample_layer(1_024, 4, apply_dropout=True),
@@ -477,18 +477,18 @@ def _build_generator_encoder_decoder_layout(network_structure: GeneratorNetworkS
         ]
     elif network_structure is GeneratorNetworkStructure.Deep:
         down_stack = [
-            down_sample_layer(64, 4),
-            down_sample_layer(128, 4),
-            down_sample_layer(128, 4, strides=1, padding='same'),
-            down_sample_layer(256, 4),
-            down_sample_layer(256, 4, strides=1, padding='same'),
-            down_sample_layer(512, 4),
-            down_sample_layer(512, 4, strides=1, padding='same'),
-            down_sample_layer(512, 4),
-            down_sample_layer(512, 4, strides=1, padding='same'),
-            down_sample_layer(512, 4),
-            down_sample_layer(512, 4, strides=1, padding='valid'),
-            down_sample_layer(512, 4),
+            _down_sample_layer(64, 4),
+            _down_sample_layer(128, 4),
+            _down_sample_layer(128, 4, strides=1, padding='same'),
+            _down_sample_layer(256, 4),
+            _down_sample_layer(256, 4, strides=1, padding='same'),
+            _down_sample_layer(512, 4),
+            _down_sample_layer(512, 4, strides=1, padding='same'),
+            _down_sample_layer(512, 4),
+            _down_sample_layer(512, 4, strides=1, padding='same'),
+            _down_sample_layer(512, 4),
+            _down_sample_layer(512, 4, strides=1, padding='valid'),
+            _down_sample_layer(512, 4),
         ]
         up_stack = [
             _up_sample_layer(512, 4, apply_dropout=True),
@@ -508,7 +508,7 @@ def _build_generator_encoder_decoder_layout(network_structure: GeneratorNetworkS
     return down_stack, up_stack
 
 
-##Build discriminator model
+##Build patch discriminator model
 def build_discriminator_model(discriminator_network_structure: DiscriminatorNetworkStructure):
     inp = layers.Input(shape=[320, 320, 3], name='input_image')
     conv_layers_layout = _build_patch_discriminator_conv_layers_layout(discriminator_network_structure)
@@ -535,42 +535,42 @@ def _build_patch_discriminator_conv_layers_layout(network_structure: Discriminat
     if network_structure is DiscriminatorNetworkStructure.Baseline:
         # final receptive filed size = 123
         conv_layers_layout = [
-            down_sample_layer(64, 5),
-            down_sample_layer(128, 4),
-            down_sample_layer(256, 3),
-            down_sample_layer(256, 2),
+            _down_sample_layer(64, 5),
+            _down_sample_layer(128, 4),
+            _down_sample_layer(256, 3),
+            _down_sample_layer(256, 2),
         ]
     elif network_structure is DiscriminatorNetworkStructure.ThinNetwork:
         # final receptive filed size = 123
         conv_layers_layout = [
-            down_sample_layer(32, 5),
-            down_sample_layer(64, 4),
-            down_sample_layer(128, 3),
-            down_sample_layer(256, 2),
+            _down_sample_layer(32, 5),
+            _down_sample_layer(64, 4),
+            _down_sample_layer(128, 3),
+            _down_sample_layer(256, 2),
         ]
     elif network_structure is DiscriminatorNetworkStructure.WideNetwork:
         # final receptive filed size = 123
         conv_layers_layout = [
-            down_sample_layer(128, 5),
-            down_sample_layer(256, 4),
-            down_sample_layer(512, 3),
-            down_sample_layer(256, 2),
+            _down_sample_layer(128, 5),
+            _down_sample_layer(256, 4),
+            _down_sample_layer(512, 3),
+            _down_sample_layer(256, 2),
         ]
     elif network_structure is DiscriminatorNetworkStructure.ThinReceptiveField:
         # final receptive filed size = 47
         conv_layers_layout = [
-            down_sample_layer(64, size=3, strides=2),
-            down_sample_layer(128, size=3, strides=2),
-            down_sample_layer(256, size=3, strides=1),
-            down_sample_layer(256, size=3, strides=1),
+            _down_sample_layer(64, size=3, strides=2),
+            _down_sample_layer(128, size=3, strides=2),
+            _down_sample_layer(256, size=3, strides=1),
+            _down_sample_layer(256, size=3, strides=1),
         ]
     elif network_structure is DiscriminatorNetworkStructure.WideReceptiveField:
         # final receptive filed size = 310
         conv_layers_layout = [
-            down_sample_layer(64, size=4, strides=3),
-            down_sample_layer(128, size=4, strides=3),
-            down_sample_layer(256, size=4, strides=2),
-            down_sample_layer(256, size=4, strides=2),
+            _down_sample_layer(64, size=4, strides=3),
+            _down_sample_layer(128, size=4, strides=3),
+            _down_sample_layer(256, size=4, strides=2),
+            _down_sample_layer(256, size=4, strides=2),
         ]
     else:
         raise NotImplementedError(f"unknown network structure - '{network_structure}'")
@@ -846,7 +846,7 @@ def create_predictions_for_kaggle_submission(monet_generator: tf.keras.Model, ph
 
 
 #Cycle gan experiment full train + kaggle submission flow
-def experiment_flow(
+def cycle_gan_experiment_flow(
         choose_30_images_method: TrainImagesSelectionMethod,
         train_settings: dict,
         experiment_random_seed: int,
@@ -909,7 +909,7 @@ def _handle_experiment_augmentations(
     return train_selected_raw_monet_dataset, train_raw_photo_dataset
 
 
-#Cycle gan experiments execution
+#Experiments execution
 ##Register experiments to run
 class ExperimentsToRunConfig:
     CHOOSE_30_TRAIN_IMAGES_EXPERIMENT = False
@@ -925,7 +925,7 @@ def run_choose_30_train_images_experiment():
     with tqdm(total=len(TrainImagesSelectionMethod), desc=base_desc) as pbar:
         for method in TrainImagesSelectionMethod:
             pbar.set_description(f"{base_desc} (curr_method = '{method}')")
-            experiment_flow(
+            cycle_gan_experiment_flow(
                 choose_30_images_method=method,
                 train_settings=dict(
                     train_epochs=40,
@@ -948,7 +948,7 @@ def run_generator_network_structure_experiment():
     with tqdm(total=len(GeneratorNetworkStructure), desc=base_desc) as pbar:
         for generator_network_structure in GeneratorNetworkStructure:
             pbar.set_description(f"{base_desc} (generator_network_structure={generator_network_structure})")
-            experiment_flow(
+            cycle_gan_experiment_flow(
                 choose_30_images_method=TrainImagesSelectionMethod.FarthestImagesByPixelDistance,
                 train_settings=dict(
                     train_epochs=40,
@@ -971,7 +971,7 @@ def run_discriminator_network_structure_experiment():
     with tqdm(total=len(DiscriminatorNetworkStructure), desc=base_desc) as pbar:
         for discriminator_network_structure in DiscriminatorNetworkStructure:
             pbar.set_description(f"{base_desc} (discriminator_network_structure={discriminator_network_structure})")
-            experiment_flow(
+            cycle_gan_experiment_flow(
                 choose_30_images_method=TrainImagesSelectionMethod.FarthestImagesByPixelDistance,
                 train_settings=dict(
                     train_epochs=40,
@@ -1041,7 +1041,7 @@ def run_train_images_augemntation_experiment():
     with tqdm(total=len(experiment_augmentation_settings_list), desc=base_desc) as pbar:
         for augmentation_settings in experiment_augmentation_settings_list:
             pbar.set_description(f"{base_desc} (augmentation_settings={augmentation_settings})")
-            experiment_flow(
+            cycle_gan_experiment_flow(
                 choose_30_images_method=TrainImagesSelectionMethod.FarthestImagesByPixelDistance,
                 train_settings=dict(
                     train_epochs=40,
@@ -1058,7 +1058,7 @@ def run_train_images_augemntation_experiment():
 
 # todo itay - delete
 def run_itay_to_delete_experiment():
-    experiment_flow(
+    cycle_gan_experiment_flow(
         choose_30_images_method=TrainImagesSelectionMethod.FarthestImagesByPixelDistance,
         train_settings=dict(
             train_epochs=40,
@@ -1081,11 +1081,12 @@ def run_itay_to_delete_experiment():
     )
 
 
+##Run registered experiments
+
 # todo itay - delete
 curr_version = 18
 print(f'*** curr_version: {curr_version} ***')
 
-##Experiment execution
 if ExperimentsToRunConfig.CHOOSE_30_TRAIN_IMAGES_EXPERIMENT:
     run_choose_30_train_images_experiment()
 
