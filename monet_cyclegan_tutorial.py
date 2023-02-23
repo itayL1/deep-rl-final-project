@@ -29,7 +29,6 @@ from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.python.data.ops.dataset_ops import Dataset
 from tensorflow.python.distribute.tpu_strategy import TPUStrategy
-import tensorflow_addons as tfa
 from skimage.metrics import structural_similarity
 from scipy.stats import wasserstein_distance
 import matplotlib.pyplot as plt
@@ -57,10 +56,9 @@ def set_training_random_seed(seed: int):
     print(f'set_training_random_seed() - seed value: {seed}')
 
 
-##Connect to strongest available device
 set_tf_deterministic_mode()
 
-
+##Connect to strongest available device
 def choose_strongest_available_device_strategy():
     try:
         tpu = tf.distribute.cluster_resolver.TPUClusterResolver()
@@ -72,9 +70,9 @@ def choose_strongest_available_device_strategy():
 
     print(f"choose_strongest_available_device_strategy() - selected strategy type: {type(selected_strategy).__name__}")
 
-    # todo itay - delete this section so it won't mess up in google colab
     gpu_is_available = any(tf.config.list_physical_devices('GPU'))
     if gpu_is_available:
+        # show gpu info
         !nvidia-smi
 
     print(f'\n\n*** running_on_tpu - {isinstance(selected_strategy, TPUStrategy)} ***\n\n')
@@ -102,6 +100,8 @@ def download_competition_dataset_if_not_present():
 download_competition_dataset_if_not_present()
 
 #Choose 30 monet train images
+
+##Utils
 class TrainImagesSelectionMethod(Enum):
     RandomSelection = 'random_selection'
     FarthestImagesByPixelDistance = 'farthest_images_by_pixel_distance'
@@ -121,6 +121,9 @@ def _choose_30_monet_train_images(
     try:
         original_raw_ordered_monet_images = list(raw_ordered_monet_dataset)
         if use_preprocessed_cache:
+            # because the image selection process is deterministic, and can take a while for
+            # to execute, we cached its results in this dictionary. if use_preprocessed_cache is
+            # set to true, this cache is utilized to reduce the runtime of the experiments.
             preprocessed_indices_cache = {
                 TrainImagesSelectionMethod.RandomSelection: [203, 266, 152, 9, 233, 226, 196, 109, 5, 175, 237, 57, 218, 45, 182, 221, 289, 211, 148, 165, 78, 113, 249, 250, 104, 42, 281, 295, 157, 238],
                 TrainImagesSelectionMethod.FarthestImagesByPixelDistance: [57, 299, 113, 74, 160, 193, 139, 283, 93, 56, 90, 196, 108, 34, 45, 40, 249, 87, 240, 106, 218, 208, 2, 289, 16, 11, 155, 52, 292, 272],
@@ -251,7 +254,10 @@ def load_tf_records_raw_dataset(tf_record_files) -> Dataset:
     return raw_dataset
 
 
-##Pick 30 train monet images strategies
+##Pick images strategies
+
+###This is based on the image distance methods implementation in this post -
+# https://gist.github.com/duhaime/211365edaddf7ff89c0a36d9f3f7956c
 def _pick_images_farthest_from_each_other(
         original_ordered_monet_images: list, distance_func, images_count: int, reverse_distance: bool = False
 ) -> list:
@@ -273,13 +279,6 @@ def _pick_images_farthest_from_each_other(
         distance_func=final_distance_func,
         pre_comparison_transformation_func=_pre_comparison_transformation_func
     )
-    return chosen_30_images_indices
-
-
-def _pick_random_images(original_ordered_monet_images: list, images_count: int) -> list:
-    chosen_30_images_indices = list(np.random.choice(
-        list(range(len(original_ordered_monet_images))), size=images_count, replace=False
-    ))
     return chosen_30_images_indices
 
 
@@ -314,6 +313,13 @@ def _incremental_farthest_search(
     return chosen_30_images_indices
 
 
+def _pick_random_images(original_ordered_monet_images: list, images_count: int) -> list:
+    chosen_30_images_indices = list(np.random.choice(
+        list(range(len(original_ordered_monet_images))), size=images_count, replace=False
+    ))
+    return chosen_30_images_indices
+
+
 def _images_pixel_distance(image1: np.array, image2: np.array) -> float:
     distance = np.sum((image1.flatten() - image2.flatten()) ** 2)
     return distance
@@ -341,30 +347,8 @@ def _calc_image_greyscale_histogram(image: np.array) -> np.array:
     return np.array(hist) / (h * w)
 
 
-def down_sample_layer(filters, size, strides=2, padding='same'):
-    initializer = tf.random_normal_initializer(0., 0.02)
-
-    network = keras.Sequential()
-    network.add(layers.Conv2D(filters, size, strides=strides, padding=padding,
-                              kernel_initializer=initializer, use_bias=False))
-
-    network.add(layers.LeakyReLU())
-
-    return network
-
-
-def up_sample_layer(filters, size, strides=2, padding='same', apply_dropout=False):
-    network = keras.Sequential()
-    network.add(layers.Conv2DTranspose(
-        filters, size, strides=strides, padding=padding, use_bias=False,
-        kernel_initializer=tf.random_normal_initializer(0., 0.02)
-    ))
-    if apply_dropout:
-        network.add(layers.Dropout(0.5))
-    network.add(layers.ReLU())
-    return network
-
-
+#Cycle gan model implementation
+##Architecture definitions
 class GeneratorNetworkStructure(Enum):
     Baseline = 'baseline'
     Thin = 'thin'
@@ -380,6 +364,32 @@ class DiscriminatorNetworkStructure(Enum):
     WideReceptiveField = 'wide_receptive_field'
 
 
+##Utils
+def down_sample_layer(filters, size, strides=2, padding='same'):
+    initializer = tf.random_normal_initializer(0., 0.02)
+
+    network = keras.Sequential()
+    network.add(layers.Conv2D(filters, size, strides=strides, padding=padding,
+                              kernel_initializer=initializer, use_bias=False))
+
+    network.add(layers.LeakyReLU())
+
+    return network
+
+
+def _up_sample_layer(filters, size, strides=2, padding='same', apply_dropout=False):
+    network = keras.Sequential()
+    network.add(layers.Conv2DTranspose(
+        filters, size, strides=strides, padding=padding, use_bias=False,
+        kernel_initializer=tf.random_normal_initializer(0., 0.02)
+    ))
+    if apply_dropout:
+        network.add(layers.Dropout(0.5))
+    network.add(layers.ReLU())
+    return network
+
+
+##Build generator model
 def build_generator_model(generator_network_structure: GeneratorNetworkStructure):
     down_stack, up_stack = _build_generator_encoder_decoder_layout(generator_network_structure)
     inputs = layers.Input(shape=[320, 320, 3])
@@ -417,13 +427,13 @@ def _build_generator_encoder_decoder_layout(network_structure: GeneratorNetworkS
             down_sample_layer(512, 4),
         ]
         up_stack = [
-            up_sample_layer(512, 4, apply_dropout=True),
-            up_sample_layer(512, 4, strides=1, padding='valid', apply_dropout=True),
-            up_sample_layer(512, 4, apply_dropout=True),
-            up_sample_layer(512, 4),
-            up_sample_layer(256, 4),
-            up_sample_layer(128, 4),
-            up_sample_layer(64, 4),
+            _up_sample_layer(512, 4, apply_dropout=True),
+            _up_sample_layer(512, 4, strides=1, padding='valid', apply_dropout=True),
+            _up_sample_layer(512, 4, apply_dropout=True),
+            _up_sample_layer(512, 4),
+            _up_sample_layer(256, 4),
+            _up_sample_layer(128, 4),
+            _up_sample_layer(64, 4),
         ]
     elif network_structure is GeneratorNetworkStructure.Thin:
         down_stack = [
@@ -437,13 +447,13 @@ def _build_generator_encoder_decoder_layout(network_structure: GeneratorNetworkS
             down_sample_layer(512, 4),
         ]
         up_stack = [
-            up_sample_layer(512, 4, apply_dropout=True),
-            up_sample_layer(512, 4, strides=1, padding='valid', apply_dropout=True),
-            up_sample_layer(256, 4, apply_dropout=True),
-            up_sample_layer(256, 4),
-            up_sample_layer(128, 4),
-            up_sample_layer(128, 4),
-            up_sample_layer(64, 4),
+            _up_sample_layer(512, 4, apply_dropout=True),
+            _up_sample_layer(512, 4, strides=1, padding='valid', apply_dropout=True),
+            _up_sample_layer(256, 4, apply_dropout=True),
+            _up_sample_layer(256, 4),
+            _up_sample_layer(128, 4),
+            _up_sample_layer(128, 4),
+            _up_sample_layer(64, 4),
         ]
     elif network_structure is GeneratorNetworkStructure.Wide:
         down_stack = [
@@ -457,13 +467,13 @@ def _build_generator_encoder_decoder_layout(network_structure: GeneratorNetworkS
             down_sample_layer(512, 4),
         ]
         up_stack = [
-            up_sample_layer(1_024, 4, apply_dropout=True),
-            up_sample_layer(1_024, 4, strides=1, padding='valid', apply_dropout=True),
-            up_sample_layer(1_024, 4, apply_dropout=True),
-            up_sample_layer(1_024, 4),
-            up_sample_layer(512, 4),
-            up_sample_layer(256, 4),
-            up_sample_layer(64, 4),
+            _up_sample_layer(1_024, 4, apply_dropout=True),
+            _up_sample_layer(1_024, 4, strides=1, padding='valid', apply_dropout=True),
+            _up_sample_layer(1_024, 4, apply_dropout=True),
+            _up_sample_layer(1_024, 4),
+            _up_sample_layer(512, 4),
+            _up_sample_layer(256, 4),
+            _up_sample_layer(64, 4),
         ]
     elif network_structure is GeneratorNetworkStructure.Deep:
         down_stack = [
@@ -481,29 +491,24 @@ def _build_generator_encoder_decoder_layout(network_structure: GeneratorNetworkS
             down_sample_layer(512, 4),
         ]
         up_stack = [
-            up_sample_layer(512, 4, apply_dropout=True),
-            up_sample_layer(512, 4, strides=1, padding='valid', apply_dropout=True),
-            up_sample_layer(512, 4, apply_dropout=True),
-            up_sample_layer(512, 4, strides=1, padding='same'),
-            up_sample_layer(512, 4),
-            up_sample_layer(512, 4, strides=1, padding='same'),
-            up_sample_layer(256, 4),
-            up_sample_layer(256, 4, strides=1, padding='same'),
-            up_sample_layer(128, 4),
-            up_sample_layer(128, 4, strides=1, padding='same'),
-            up_sample_layer(64, 4),
+            _up_sample_layer(512, 4, apply_dropout=True),
+            _up_sample_layer(512, 4, strides=1, padding='valid', apply_dropout=True),
+            _up_sample_layer(512, 4, apply_dropout=True),
+            _up_sample_layer(512, 4, strides=1, padding='same'),
+            _up_sample_layer(512, 4),
+            _up_sample_layer(512, 4, strides=1, padding='same'),
+            _up_sample_layer(256, 4),
+            _up_sample_layer(256, 4, strides=1, padding='same'),
+            _up_sample_layer(128, 4),
+            _up_sample_layer(128, 4, strides=1, padding='same'),
+            _up_sample_layer(64, 4),
         ]
     else:
         raise NotImplementedError(f"unknown network structure - '{network_structure}'")
     return down_stack, up_stack
 
 
-"""# Build the discriminator
-
-The discriminator takes in the input image and classifies it as real or fake (generated). Instead of outputing a single node, the discriminator outputs a smaller 2D image with higher pixel values indicating a real classification and lower values indicating a fake classification.
-"""
-
-
+##Build discriminator model
 def build_discriminator_model(discriminator_network_structure: DiscriminatorNetworkStructure):
     inp = layers.Input(shape=[320, 320, 3], name='input_image')
     conv_layers_layout = _build_patch_discriminator_conv_layers_layout(discriminator_network_structure)
@@ -572,6 +577,7 @@ def _build_patch_discriminator_conv_layers_layout(network_structure: Discriminat
     return conv_layers_layout
 
 
+##Build cycle gan model
 class CycleGan(keras.Model):
     def __init__(
             self,
@@ -704,7 +710,7 @@ def _build_losses():
     return identity_loss, generators_loss, discriminators_loss, final_cycle_loss
 
 
-def _build_cycle_gan_model(train_settings):
+def construct_cycle_gan_model(train_settings):
     generator_network_structure = train_settings['generator_network_structure']
     discriminator_network_structure = train_settings['discriminator_network_structure']
     monet_generator = build_generator_model(generator_network_structure)
@@ -736,7 +742,7 @@ def _build_cycle_gan_model(train_settings):
     return cycle_gan_model, monet_generator
 
 
-#Add Image augmentations to train dataset
+#Train images augmentations
 def add_random_augmentations(
         raw_images_dataset: Dataset, random_seed: int, usage_each_image_n_times: int
 ) -> Dataset:
@@ -816,12 +822,7 @@ def plot_predictions_sample(monet_generator, photo_dataset):
     plt.show()
 
 
-"""# Define loss functions
-
-The discriminator loss function below compares real images to a matrix of 1s and fake images to a matrix of 0s. The perfect discriminator will output all 1s for real images and all 0s for fake images. The discriminator loss outputs the average of the real and generated loss.
-"""
-
-"""# Create submission file"""
+#Kaggle competition submission utils
 def create_predictions_for_kaggle_submission(monet_generator: tf.keras.Model, photo_dataset: Dataset):
     wip_images_folder = Path(f"/tmp/wip_{datetime.now().strftime('%y_%m_%d__%H_%M_%S')}/")
     wip_images_folder.mkdir(parents=True, exist_ok=True)
@@ -844,6 +845,7 @@ def create_predictions_for_kaggle_submission(monet_generator: tf.keras.Model, ph
             pbar.update()
 
 
+#Cycle gan experiment full train + kaggle submission flow
 def experiment_flow(
         choose_30_images_method: TrainImagesSelectionMethod,
         train_settings: dict,
@@ -861,7 +863,7 @@ def experiment_flow(
         experiment_random_seed, use_preprocessed_cache=True
     )
 
-    train_selected_raw_monet_dataset, train_raw_photo_dataset = _handle_augmentations(
+    train_selected_raw_monet_dataset, train_raw_photo_dataset = _handle_experiment_augmentations(
         train_settings['augmentation_settings'], experiment_random_seed,
         train_selected_raw_monet_dataset, train_raw_photo_dataset
     )
@@ -872,7 +874,7 @@ def experiment_flow(
     train_pairs_dataset = tf.data.Dataset.zip((train_selected_monet_dataset, train_photo_dataset))
 
     with DEVICE_STRATEGY.scope():
-        cycle_gan_model, monet_generator = _build_cycle_gan_model(train_settings)
+        cycle_gan_model, monet_generator = construct_cycle_gan_model(train_settings)
 
     train_history = cycle_gan_model.fit(
         train_pairs_dataset,
@@ -888,7 +890,7 @@ def experiment_flow(
         create_predictions_for_kaggle_submission(monet_generator, inference_photo_dataset)
 
 
-def _handle_augmentations(
+def _handle_experiment_augmentations(
         augmentation_settings: dict, experiment_random_seed: int,
         train_selected_raw_monet_dataset: Dataset, train_raw_photo_dataset: Dataset
 ):
@@ -907,8 +909,8 @@ def _handle_augmentations(
     return train_selected_raw_monet_dataset, train_raw_photo_dataset
 
 
-#Experiments
-##Experiment functions
+#Cycle gan experiments execution
+##Register experiments to run
 class ExperimentsToRunConfig:
     CHOOSE_30_TRAIN_IMAGES_EXPERIMENT = False
     GENERATOR_NETWORK_STRUCTURE_EXPERIMENT = False
@@ -917,6 +919,7 @@ class ExperimentsToRunConfig:
     ITAY_TO_DELETE_EXPERIMENT = True
 
 
+##Experiments functions
 def run_choose_30_train_images_experiment():
     base_desc = 'choose_30_images_methods loop'
     with tqdm(total=len(TrainImagesSelectionMethod), desc=base_desc) as pbar:
@@ -1053,6 +1056,7 @@ def run_train_images_augemntation_experiment():
             pbar.update()
 
 
+# todo itay - delete
 def run_itay_to_delete_experiment():
     experiment_flow(
         choose_30_images_method=TrainImagesSelectionMethod.FarthestImagesByPixelDistance,
@@ -1076,6 +1080,8 @@ def run_itay_to_delete_experiment():
         create_kaggle_predictions_for_submission=False
     )
 
+
+# todo itay - delete
 curr_version = 18
 print(f'*** curr_version: {curr_version} ***')
 
