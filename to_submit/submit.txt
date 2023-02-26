@@ -1,6 +1,8 @@
 - link to our train notebook in Google Colab:
+https://colab.research.google.com/drive/1HVOYKNO_Wr5gIPydsSINsGEhfxGbsWXr?usp=sharing#scrollTo=v9tkeXavuGw4
 
 - link to our test notebook in Google Colab:
+https://colab.research.google.com/drive/1bUns3iR8ry2VXhK1my2tNdfTAdPVunqJ#scrollTo=LEw570hXlqdq
 
 - link to the Kaggle submission of our best model:
 https://www.kaggle.com/code/itaysstorage/notebookaffcb41770?scriptVersionId=119540087

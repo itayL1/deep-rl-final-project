@@ -60,11 +60,12 @@ In addition, please notice that we didn't have the room to include the output im
 \textbf{Experiment 1 - training stability and convergence}
 \\
 First, we wanted to find an optimal configuration of the optimizer and decide how many epochs needed for the training.
-To find the optimal optimizer configuration we checked at which learning rate the model not able to converge. Then, picked a slightly higher learning rate.
+To find the optimal optimizer configuration we checked at which learning rate the model was not able to converge. Then, we picked a slightly higher learning rate.
 Then, we have tested how many epochs are required until there is no effect on the model losses. In this case, we examined all the losses of the Cycle gun.
 Note that we have observed that a small decay of the optimizer learning rate (though not required for Adam optimizer) gives slightly more stable results.
-Our final Adam optimizer configuration was learning of 0.001 with decay of 0.001.
-With this configuration, 40 epochs were enough for the training to complete.
+The optimizer configuration has been slightly changed during the experimentation.
+Our Adam optimizer learning rate vary between 0.001 to 0.0002 with decay of 0.001.
+40 epochs were enough for the training to complete with this configuration.
 \\\\
 \newblock
 \textbf{Experiment 2 - selection of the 30 Monet training images}
@@ -166,14 +167,72 @@ Notice that the augmentations usage on both datasets seemed to have a very posit
     \includegraphics[width=0.8\linewidth,keepaspectratio]{a1_e5_tg.png}
 \end{center}
 
-\section{Discussion}
+\subsection{Architecture 2 - Neural Style Transfer}
+Neural style transfer is a technique that combines the content of one image with the style of another image. It requires using a pre-trained CNN to extract both the content and style features from the input images. We have used vgg19 as the pre-trained CNN
+\\\\
+\newblock
+\textbf{Experiment 1 - optimize iterations}
+\\
+In the first experiment, we wanted to understand how many iterations are required to converge the loss properly and provide a visually good-stylish image.
 
+\begin{center}
+    \includegraphics[width=0.6\linewidth,keepaspectratio]{a2_e1_1.png}
+\end{center}
+
+We also printed the output image for every 1,000 iterations. We couldn’t notice any significant differences between the images, so we decided to continue the rest of the experiments with 1,000 iterations (as it seems to be sufficient).
+
+\begin{center}
+    \includegraphics[width=0.7\linewidth,keepaspectratio]{a2_e1_2.png}
+\end{center}
+\\\\
+\newblock
+\textbf{Experiment 2 - different loss weights}
+\\
+In this experiment, we wanted to test the visual effect of changing the weights of the style, content, and total-vairation losses.
+We tested each of the weights separately to understand its impact on the result image.
+\\\\
+\newblock
+\textbf{Style loss weight}
+\\
+We have examined different weights for the style loss. As expected, the higher the weight is, the more monet-like image we get. We also noticed that extreme values (compared to what we started with) often result in a black image.
+Selected value: 2e-6
+
+\begin{center}
+    \includegraphics[width=0.6\linewidth,keepaspectratio]{a2_e2_1.png}
+\end{center}
+\\\\
+\newblock
+\textbf{Content loss weight}
+\\
+We expected to get a more realistic photo with greater weight values, but the observed differences were minor.
+Selected value: 2.5e-8
+
+\begin{center}
+    \includegraphics[width=0.6\linewidth,keepaspectratio]{a2_e2_2.png}
+\end{center}
+\\\\
+\newblock
+\textbf{Total-variation loss weight}
+\\
+This loss is a regularizer component that favors the same color/value for adjusted pixels. As expected, the picture is more blurred with greater total-variation loss weight.
+Selected value: 1e-6
+
+\begin{center}
+    \includegraphics[width=0.6\linewidth,keepaspectratio]{a2_e2_3.png}
+\end{center}
+
+\section{Discussion}
+First, we were able to build generative models that take real photos and produce monet-like images - which is very fulfilling and self assuring.
+One of the main challenges that we have encountered is the data. Not only the limited amount for monet-style images, but also that we didn’t have trained data for pre-monet style and after-monet style. This, in our opinion, is the main reason why we were not able to train a Variational Autoencoder model with decent results.
+To overcome this, we used two unique modelling approaches. One is the cycle GAN and the other is the Neural Style Transfer. The cycle GAN fits this task as it doesn’t require trained data with pre/post monet styling, and it also manages to fit on very small datasets. Augmentation is a key factor to improve the model results.
+The Neural Style Transfer is a unique approach that blends the content of one image with the style of another. The visual output of this model is remarkable. The downside of this model is that it requires significant resources to produce a styled image, therefore it takes a very long time to produce thousands of styled images (and this is the reason why not used this model in Kaggle competition).
+Another challenging aspect in this project was the lack of simply why to evaluate the improvements in our models. In order to handle it, we decided to treat the loss values as proxy for the expected performance of the final generative model, and frequently validated our assumptions by submitting our predictions in Kaggle and checking the updated score.
 
 
 \section{Code}
 \begin{itemize}
-    \item Here is \href{https://colab.research.google.com/drive/1O95T3f5k68-do9Ml-EqE1FKqu67zdDw1}{a link to our train notebook in Google Colab}
-    \item Here is \href{https://colab.research.google.com/drive/1O95T3f5k68-do9Ml-EqE1FKqu67zdDw1}{a link to our test notebook in Google Colab}
+    \item Here is \href{https://colab.research.google.com/drive/1HVOYKNO_Wr5gIPydsSINsGEhfxGbsWXr?usp=sharing#scrollTo=v9tkeXavuGw4}{a link to our train notebook in Google Colab}
+    \item Here is \href{https://colab.research.google.com/drive/1bUns3iR8ry2VXhK1my2tNdfTAdPVunqJ#scrollTo=LEw570hXlqdq}{a link to our test notebook in Google Colab}
     \item Here is \href{https://www.kaggle.com/code/itaysstorage/notebookaffcb41770?scriptVersionId=119540087}{a link to the Kaggle submission of our best model}. Please notice that although there are a few submissions with a better score on our team, they are old test submissions and are irrelevant (for example, trains that used all the 300 Monent images). Unfortunately, there is no way to delete these submissions from Kaggle.
 \end{itemize}
 
