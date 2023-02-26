@@ -1,0 +1,12 @@
+- link to our train notebook in Google Colab:
+
+- link to our test notebook in Google Colab:
+
+- link to the Kaggle submission of our best model:
+https://www.kaggle.com/code/itaysstorage/notebookaffcb41770?scriptVersionId=119540087
+
+Full name of student number 1: Ohad Bruker
+ID of student number 1: 027163153
+
+Full name of student number 2: Itay Lotan
+ID of student number 2: 308453935
