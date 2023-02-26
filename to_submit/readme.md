@@ -2,7 +2,7 @@
 ## Ohad Bruker ID. (027163153), Itay Lotan (ID. 308453935)
 
 This project includes 2 notebooks for the train experiments and the test environment.
-- In order to run the train experiments, you need to:[]()
+- In order to run the train experiments, you need to do:
   - Toggle on the experiments that you want to run. This can be done in the call that is referred by the 
     'Register experiments to run' in the table of contents. The details of all the experiments are elaborated in the 
     project's report.
