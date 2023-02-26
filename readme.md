@@ -1,4 +1,5 @@
 # Deep learning final project readme
+## Ohad Bruker ID. (027163153), Itay Lotan (ID. 308453935)
 
 This project includes 2 notebooks for the train experiments and the test environment.
 - In order to run the train experiments, you need to:[]()
